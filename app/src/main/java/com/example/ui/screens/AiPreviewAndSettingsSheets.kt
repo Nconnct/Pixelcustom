@@ -39,12 +39,13 @@ import androidx.compose.material.icons.filled.TouchApp
 import androidx.compose.material.icons.filled.Undo
 import androidx.compose.material.icons.filled.Widgets
 import androidx.compose.material3.Button
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -60,6 +61,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -226,6 +228,7 @@ fun AiLayoutPreviewSheet(
                     FilterChip(
                         selected = selected,
                         onClick = { onSelectMode(mode) },
+                        border = null,
                         label = { Text(mode.displayName) },
                         leadingIcon = if (selected) {
                             { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp)) }
@@ -351,7 +354,7 @@ fun AiLayoutPreviewSheet(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    OutlinedButton(
+                    FilledTonalButton(
                         onClick = onClose,
                         modifier = Modifier.weight(1f)
                     ) {
@@ -522,7 +525,7 @@ fun SettingsAndCustomizationSheet(
                     )
                 }
 
-                OutlinedButton(
+                FilledTonalButton(
                     onClick = onRequestDefaultHome,
                     modifier = Modifier.testTag("settings_default_home_button")
                 ) {
@@ -697,6 +700,7 @@ fun SettingsAndCustomizationSheet(
                                 FilterChip(
                                     selected = settings.themeMode == mode,
                                     onClick = { onUpdateSettings { it.copy(themeMode = mode) } },
+                                    border = null,
                                     label = { Text(mode) }
                                 )
                             }
@@ -714,6 +718,7 @@ fun SettingsAndCustomizationSheet(
                                 FilterChip(
                                     selected = settings.accentColorName == name,
                                     onClick = { onUpdateSettings { it.copy(accentColorName = name) } },
+                                    border = null,
                                     label = { Text(name) },
                                     leadingIcon = {
                                         Box(
@@ -739,6 +744,7 @@ fun SettingsAndCustomizationSheet(
                                 FilterChip(
                                     selected = settings.wallpaperPresetId == id,
                                     onClick = { onUpdateSettings { it.copy(wallpaperPresetId = id) } },
+                                    border = null,
                                     label = { Text(label) }
                                 )
                             }
@@ -780,6 +786,7 @@ fun SettingsAndCustomizationSheet(
                                 FilterChip(
                                     selected = settings.iconShape == shapeOpt.id,
                                     onClick = { onUpdateSettings { it.copy(iconShape = shapeOpt.id) } },
+                                    border = null,
                                     label = { Text(shapeOpt.displayName) }
                                 )
                             }
@@ -874,6 +881,7 @@ fun SettingsAndCustomizationSheet(
                                 FilterChip(
                                     selected = settings.swipeUpAction == actId,
                                     onClick = { onUpdateSettings { it.copy(swipeUpAction = actId) } },
+                                    border = null,
                                     label = { Text(label) }
                                 )
                             }
@@ -885,6 +893,7 @@ fun SettingsAndCustomizationSheet(
                                 FilterChip(
                                     selected = settings.swipeDownAction == actId,
                                     onClick = { onUpdateSettings { it.copy(swipeDownAction = actId) } },
+                                    border = null,
                                     label = { Text(label) }
                                 )
                             }
@@ -896,6 +905,7 @@ fun SettingsAndCustomizationSheet(
                                 FilterChip(
                                     selected = settings.doubleTapAction == actId,
                                     onClick = { onUpdateSettings { it.copy(doubleTapAction = actId) } },
+                                    border = null,
                                     label = { Text(label) }
                                 )
                             }
@@ -907,6 +917,7 @@ fun SettingsAndCustomizationSheet(
                                 FilterChip(
                                     selected = settings.defaultSearchEngine == engine,
                                     onClick = { onUpdateSettings { it.copy(defaultSearchEngine = engine) } },
+                                    border = null,
                                     label = { Text(engine) }
                                 )
                             }
@@ -987,7 +998,7 @@ fun SettingsAndCustomizationSheet(
                                 Text("Generate Backup")
                             }
 
-                            OutlinedButton(
+                            FilledTonalButton(
                                 onClick = {
                                     val payload = importJsonInput.ifBlank { state.backupJsonExportText }
                                     if (payload.isNotBlank()) {
@@ -1012,6 +1023,13 @@ fun SettingsAndCustomizationSheet(
                                 readOnly = true,
                                 label = { Text("Exported Local Backup JSON (Copy or Restore directly)") },
                                 maxLines = 6,
+                                shape = RoundedCornerShape(18.dp),
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.42f),
+                                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.28f),
+                                    focusedBorderColor = Color.Transparent,
+                                    unfocusedBorderColor = Color.Transparent
+                                ),
                                 modifier = Modifier.fillMaxWidth()
                             )
                         }
@@ -1021,6 +1039,13 @@ fun SettingsAndCustomizationSheet(
                             onValueChange = { importJsonInput = it },
                             label = { Text("Paste Backup JSON to Restore") },
                             maxLines = 5,
+                            shape = RoundedCornerShape(18.dp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.42f),
+                                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.28f),
+                                focusedBorderColor = Color.Transparent,
+                                unfocusedBorderColor = Color.Transparent
+                            ),
                             modifier = Modifier.fillMaxWidth()
                         )
                     }

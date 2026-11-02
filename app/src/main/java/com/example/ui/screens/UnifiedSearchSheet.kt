@@ -59,11 +59,11 @@ import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
@@ -792,7 +792,7 @@ fun UnifiedSearchSheet(
                                             )
                                         }
                                         Spacer(modifier = Modifier.width(8.dp))
-                                        OutlinedButton(
+                                        FilledTonalButton(
                                             onClick = {
                                                 contactsPermissionLauncher.launch(Manifest.permission.READ_CONTACTS)
                                             },
@@ -1121,7 +1121,6 @@ private fun EmbeddedSecureSearchWebView(
             val bgRgba = if (isDark) "rgba(15, 23, 42, 0.24)" else "rgba(248, 250, 252, 0.30)"
             val cardRgba = if (isDark) "rgba(30, 41, 59, 0.50)" else "rgba(255, 255, 255, 0.56)"
             val searchBarRgba = if (isDark) "rgba(15, 23, 42, 0.58)" else "rgba(255, 255, 255, 0.66)"
-            val borderRgba = if (isDark) "rgba(255, 255, 255, 0.24)" else "rgba(255, 255, 255, 0.62)"
             val textHex = if (isDark) "#F8FAFC" else "#0F172A"
             """
             (function() {
@@ -1131,19 +1130,19 @@ private fun EmbeddedSecureSearchWebView(
                 'header, nav, #gb, #searchform, .b_scopebar, .zGVn2e, .RNNXgb, .SDkEP, .A8SBwf, #sb_form, .b_searchboxForm, form[role="search"], form[action*="search"], .search-container, .searchbox_searchbox__bfbmv { ' +
                     'background: $searchBarRgba !important; background-color: $searchBarRgba !important; ' +
                     'backdrop-filter: blur(20px) saturate(185%) !important; -webkit-backdrop-filter: blur(20px) saturate(185%) !important; ' +
-                    'border: 1px solid $borderRgba !important; border-radius: 24px !important; ' +
-                    'box-shadow: 0 8px 28px rgba(0, 0, 0, 0.20) !important; ' +
+                    'border: none !important; outline: none !important; border-radius: 24px !important; ' +
+                    'box-shadow: 0 8px 28px rgba(0, 0, 0, 0.16) !important; ' +
                 '} ' +
                 'input[type="search"], input[type="text"], input[name="q"], textarea[name="q"], .gLFyf, #sb_form_q, .b_searchbox, .search-input, input { ' +
-                    'background: transparent !important; background-color: transparent !important; ' +
+                    'background: transparent !important; background-color: transparent !important; border: none !important; outline: none !important; ' +
                     'color: $textHex !important; caret-color: #60A5FA !important; ' +
                 '} ' +
                 'div.g, .MjjYud > div, .result, .b_algo, article, section, .kp-blk, .xpd, .b_ans, .card { ' +
                     'background: $cardRgba !important; background-color: $cardRgba !important; ' +
                     'backdrop-filter: blur(16px) saturate(175%) !important; -webkit-backdrop-filter: blur(16px) saturate(175%) !important; ' +
-                    'border: 1px solid $borderRgba !important; border-radius: 18px !important; ' +
+                    'border: none !important; outline: none !important; border-radius: 18px !important; ' +
                     'margin-bottom: 10px !important; padding: 10px !important; ' +
-                    'box-shadow: 0 4px 18px rgba(0, 0, 0, 0.14) !important; ' +
+                    'box-shadow: 0 4px 18px rgba(0, 0, 0, 0.12) !important; ' +
                 '}';
                 var applyStyle = function() {
                     var head = document.head || document.documentElement;
@@ -1337,6 +1336,7 @@ private fun EmbeddedSecureSearchWebView(
                                     isGlassWebMode = !isGlassWebMode
                                     webViewRef?.let { applyFrostedWebCss(it, isGlassWebMode) }
                                 },
+                                border = null,
                                 label = {
                                     Text(
                                         text = if (isGlassWebMode) "Glass Web ON" else "Solid Web",

@@ -8,7 +8,6 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
@@ -157,8 +156,8 @@ fun PixelWallpaperBackground(
 }
 
 /**
- * Reusable iOS/Pixel Frosted Glass surface with multi-layered specular sheen,
- * diagonal glass luminance, and optional specular border.
+ * Reusable iOS/Pixel Frosted Glass surface with multi-layered specular sheen
+ * and soft borderless glass luminance (matching the 4-app Home Screen dock).
  */
 @Composable
 fun FrostedGlassBox(
@@ -166,17 +165,12 @@ fun FrostedGlassBox(
     shape: Shape = RoundedCornerShape(24.dp),
     alphaOverride: Float? = null,
     tintOverride: Color? = null,
-    showBorder: Boolean = true,
+    showBorder: Boolean = false,
     content: @Composable () -> Unit
 ) {
     val tokens = LocalLauncherTokens.current
     val surfaceAlpha = (alphaOverride ?: tokens.frostedSurfaceAlpha).coerceIn(0.14f, 0.94f)
     val baseColor = tintOverride ?: tokens.surfaceColor
-    val borderColor = if (tokens.isDarkTheme) {
-        Color.White.copy(alpha = 0.22f)
-    } else {
-        Color.White.copy(alpha = 0.52f)
-    }
     val topSpecular = if (tokens.isDarkTheme) {
         Color.White.copy(alpha = 0.14f)
     } else {
@@ -203,13 +197,6 @@ fun FrostedGlassBox(
                         topSpecular.copy(alpha = 0.04f)
                     )
                 )
-            )
-            .then(
-                if (showBorder) {
-                    Modifier.border(width = 1.dp, color = borderColor, shape = shape)
-                } else {
-                    Modifier
-                }
             )
     ) {
         content()
@@ -391,7 +378,8 @@ fun PixelBottomSearchBar(
 
     FrostedGlassBox(
         shape = RoundedCornerShape(tokens.searchCornerRadius),
-        alphaOverride = tokens.frostedSurfaceAlpha,
+        alphaOverride = (tokens.frostedSurfaceAlpha * 0.58f).coerceIn(0.22f, 0.48f),
+        showBorder = false,
         modifier = modifier
             .fillMaxWidth()
             .height(50.dp)
@@ -534,7 +522,6 @@ fun LauncherAppTile(
                         .height(18.dp)
                         .clip(CircleShape)
                         .background(MaterialTheme.colorScheme.primary)
-                        .border(1.5.dp, Color(0xFF0F172A), CircleShape)
                         .padding(horizontal = 4.dp)
                         .testTag("app_badge_${app.packageName}"),
                     contentAlignment = Alignment.Center
@@ -590,10 +577,10 @@ fun LauncherAppTile(
 }
 
 /**
- * Uniform Circular Frosted Glass Smart Folder tile on the Home Screen:
- * Matches the exact circular icon size and label footprint of LauncherAppTile,
- * renders a balanced 2x2 mini-icon preview grid inside the frosted circle,
- * and displays the dynamic unread notification count badge on the top-right corner.
+ * Authentic iOS Frosted Glass Folder tile on the Home Screen:
+ * Renders a borderless iOS continuous squircle (`RoundedCornerShape(percent = 26)`) matching the
+ * icon footprint, containing a 3x3 mini-icon grid of real app icons with zero internal text.
+ * Only the folder name is displayed below the squircle, plus the dynamic unread badge on the corner.
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -612,14 +599,15 @@ fun LauncherFolderTile(
     val haptics = LocalHapticFeedback.current
     val view = LocalView.current
     val scaledSize = (iconSizeDp.value * iconScale.coerceIn(0.75f, 1.25f)).dp
-    val miniIconSize = (scaledSize.value * 0.34f).dp
+    val miniIconSize = (scaledSize.value * 0.235f).dp
+    val iosSquircleShape = RoundedCornerShape(percent = 26)
 
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
         modifier = modifier
             .minimumInteractiveComponentSize()
-            .clip(RoundedCornerShape(14.dp))
+            .clip(RoundedCornerShape(16.dp))
             .combinedClickable(
                 onClick = {
                     haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
@@ -637,27 +625,28 @@ fun LauncherFolderTile(
     ) {
         Box(contentAlignment = Alignment.TopEnd) {
             FrostedGlassBox(
-                shape = CircleShape,
-                alphaOverride = 0.48f,
+                shape = iosSquircleShape,
+                alphaOverride = 0.44f,
+                showBorder = false,
                 modifier = Modifier.size(scaledSize)
             ) {
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding((scaledSize.value * 0.13f).dp),
-                    verticalArrangement = Arrangement.SpaceEvenly,
+                        .padding((scaledSize.value * 0.11f).dp),
+                    verticalArrangement = Arrangement.SpaceBetween,
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    for (r in 0..1) {
+                    for (r in 0..2) {
                         Row(
-                            horizontalArrangement = Arrangement.SpaceEvenly,
+                            horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            for (c in 0..1) {
-                                val idx = r * 2 + c
+                            for (c in 0..2) {
+                                val idx = r * 3 + c
                                 val app = memberApps.getOrNull(idx)
-                                CircularFolderMiniIcon(
+                                IosFolderMiniIcon(
                                     app = app,
                                     size = miniIconSize
                                 )
@@ -678,7 +667,6 @@ fun LauncherFolderTile(
                         .height(19.dp)
                         .clip(CircleShape)
                         .background(MaterialTheme.colorScheme.primary)
-                        .border(1.5.dp, Color(0xFF0F172A), CircleShape)
                         .padding(horizontal = 4.dp)
                         .testTag("folder_badge_${folder.id}"),
                     contentAlignment = Alignment.Center
@@ -711,38 +699,30 @@ fun LauncherFolderTile(
 }
 
 @Composable
-private fun CircularFolderMiniIcon(
+private fun IosFolderMiniIcon(
     app: AppInfo?,
     size: Dp
 ) {
+    val miniSquircle = RoundedCornerShape(percent = 26)
+    if (app == null) {
+        Spacer(modifier = Modifier.size(size))
+        return
+    }
     Box(
         modifier = Modifier
             .size(size)
-            .clip(CircleShape)
-            .background(
-                if (app != null) {
-                    MaterialTheme.colorScheme.primary.copy(alpha = 0.28f)
-                } else {
-                    Color.White.copy(alpha = 0.10f)
-                }
-            ),
+            .clip(miniSquircle)
+            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.52f)),
         contentAlignment = Alignment.Center
     ) {
-        if (app?.appIcon != null) {
+        if (app.appIcon != null) {
             Image(
                 bitmap = app.appIcon,
-                contentDescription = app.appName,
+                contentDescription = null,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier
                     .fillMaxSize()
-                    .clip(CircleShape)
-            )
-        } else if (app != null) {
-            Text(
-                text = app.appName.take(1).uppercase(),
-                style = MaterialTheme.typography.labelSmall.copy(fontSize = 8.sp),
-                color = Color.White,
-                fontWeight = FontWeight.SemiBold
+                    .clip(miniSquircle)
             )
         }
     }

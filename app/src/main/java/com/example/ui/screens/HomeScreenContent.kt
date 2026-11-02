@@ -6,7 +6,6 @@ import android.provider.Settings
 import android.view.HapticFeedbackConstants
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -38,6 +37,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CreateNewFolder
 import androidx.compose.material.icons.filled.Delete
@@ -50,12 +50,13 @@ import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material.icons.filled.Widgets
 import androidx.compose.material3.Button
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -77,6 +78,7 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
@@ -444,10 +446,8 @@ fun HomeScreenContent(
                                             if (movingHomeItem != null) {
                                                 Modifier
                                                     .clip(RoundedCornerShape(14.dp))
-                                                    .border(
-                                                        1.dp,
-                                                        MaterialTheme.colorScheme.primary.copy(alpha = 0.6f),
-                                                        RoundedCornerShape(14.dp)
+                                                    .background(
+                                                        MaterialTheme.colorScheme.primary.copy(alpha = 0.20f)
                                                     )
                                                     .clickable {
                                                         onMoveHomeItem(movingHomeItem.id, pageIndex, dbRow, c, false)
@@ -612,10 +612,8 @@ fun HomeScreenContent(
                                         if (movingHomeItem != null) {
                                             Modifier
                                                 .clip(RoundedCornerShape(14.dp))
-                                                .border(
-                                                    1.dp,
-                                                    MaterialTheme.colorScheme.primary,
-                                                    RoundedCornerShape(14.dp)
+                                                .background(
+                                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.20f)
                                                 )
                                                 .clickable {
                                                     onMoveHomeItem(
@@ -744,7 +742,7 @@ fun HomeScreenContent(
                                 Text("Set as Default Home Launcher")
                             }
                         }
-                        OutlinedButton(
+                        FilledTonalButton(
                             onClick = {
                                 showHomeLongPressDialog = false
                                 onOpenOverlay(ActiveOverlaySheet.AI_ORGANIZER_PREVIEW)
@@ -757,7 +755,7 @@ fun HomeScreenContent(
                             Spacer(Modifier.width(8.dp))
                             Text("AI Auto-Arrange & Undo Layout")
                         }
-                        OutlinedButton(
+                        FilledTonalButton(
                             onClick = {
                                 showHomeLongPressDialog = false
                                 showCreateFolderDialog = true
@@ -768,9 +766,9 @@ fun HomeScreenContent(
                         ) {
                             Icon(Icons.Default.CreateNewFolder, contentDescription = null)
                             Spacer(Modifier.width(8.dp))
-                            Text("Create Adaptive iOS Smart Folder")
+                            Text("Create iOS Smart Folder")
                         }
-                        OutlinedButton(
+                        FilledTonalButton(
                             onClick = {
                                 showHomeLongPressDialog = false
                                 onOpenOverlay(ActiveOverlaySheet.WIDGET_PICKER)
@@ -783,7 +781,7 @@ fun HomeScreenContent(
                             Spacer(Modifier.width(8.dp))
                             Text("Widgets & AppWidgetHost")
                         }
-                        OutlinedButton(
+                        FilledTonalButton(
                             onClick = {
                                 showHomeLongPressDialog = false
                                 onOpenOverlay(ActiveOverlaySheet.SETTINGS_CUSTOMIZATION)
@@ -845,154 +843,188 @@ private fun FolderDetailModal(
     val memberApps = remember(folder.memberPackages, appsMap) {
         folder.memberPackages.mapNotNull { appsMap[it] }
     }
-    val tierDescription = remember(selectedPackages.size, memberApps.size) {
-        val count = if (isEditing) selectedPackages.size else memberApps.size
-        when {
-            count >= 6 -> "Large iOS App Library Folder • $count apps"
-            count >= 4 -> "Medium Expanded iOS Folder • $count apps"
-            else -> "Compact iOS Folder • $count apps"
-        }
-    }
 
     Dialog(onDismissRequest = onDismiss) {
-        FrostedGlassBox(
-            shape = RoundedCornerShape(32.dp),
-            alphaOverride = 0.78f,
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(8.dp)
+                .padding(horizontal = 12.dp)
                 .testTag("folder_detail_modal")
         ) {
-            Column(
+            // iOS Style Centered Folder Title Above/At Top of Folder (Only Folder Name Text Stays)
+            Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(20.dp)
-                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 8.dp, vertical = 10.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
+                if (isEditing) {
+                    OutlinedTextField(
+                        value = editedName,
+                        onValueChange = { editedName = it },
+                        singleLine = true,
+                        textStyle = MaterialTheme.typography.headlineSmall.copy(
+                            fontWeight = FontWeight.Bold,
+                            textAlign = TextAlign.Center,
+                            color = Color.White
+                        ),
+                        shape = RoundedCornerShape(20.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White,
+                            cursorColor = MaterialTheme.colorScheme.primary,
+                            focusedContainerColor = Color.White.copy(alpha = 0.16f),
+                            unfocusedContainerColor = Color.White.copy(alpha = 0.12f),
+                            focusedBorderColor = Color.Transparent,
+                            unfocusedBorderColor = Color.Transparent
+                        ),
+                        modifier = Modifier.weight(1f)
+                    )
+                } else {
+                    Text(
+                        text = folder.folderName,
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    if (isEditing) {
-                        OutlinedTextField(
-                            value = editedName,
-                            onValueChange = { editedName = it },
-                            label = { Text("Folder Name") },
-                            singleLine = true,
-                            modifier = Modifier.weight(1f)
-                        )
-                    } else {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = folder.folderName,
-                                style = MaterialTheme.typography.titleLarge,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                            Text(
-                                text = tierDescription,
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.primary
+                    FrostedGlassBox(
+                        shape = CircleShape,
+                        alphaOverride = 0.46f,
+                        showBorder = false,
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clickable {
+                                if (isEditing) {
+                                    onUpdateFolder(folder.id, editedName, selectedPackages.toList())
+                                    isEditing = false
+                                } else {
+                                    isEditing = true
+                                }
+                            }
+                            .testTag(if (isEditing) "save_folder_apps_button" else "folder_add_edit_apps_button")
+                    ) {
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = if (isEditing) Icons.Default.Check else Icons.Default.Add,
+                                contentDescription = if (isEditing) "Save Folder" else "Add or Edit Apps",
+                                tint = Color.White,
+                                modifier = Modifier.size(18.dp)
                             )
                         }
                     }
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        FrostedGlassBox(
-                            shape = RoundedCornerShape(16.dp),
-                            alphaOverride = 0.55f,
-                            modifier = Modifier
-                                .clickable { isEditing = !isEditing }
-                                .testTag("folder_add_edit_apps_button")
+
+                    FrostedGlassBox(
+                        shape = CircleShape,
+                        alphaOverride = 0.46f,
+                        showBorder = false,
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clickable { onDeleteFolder(folder.id) }
+                    ) {
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center
                         ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
-                            ) {
-                                Icon(
-                                    imageVector = if (isEditing) Icons.Default.Close else Icons.Default.Add,
-                                    contentDescription = "Add or Edit Apps",
-                                    tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Text(
-                                    text = if (isEditing) "Cancel" else "Add Apps",
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                            }
-                        }
-                        IconButton(onClick = { onDeleteFolder(folder.id) }) {
                             Icon(
                                 imageVector = Icons.Default.Delete,
                                 contentDescription = "Delete Folder",
-                                tint = MaterialTheme.colorScheme.error
+                                tint = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.size(18.dp)
                             )
                         }
                     }
                 }
+            }
 
-                Spacer(modifier = Modifier.height(14.dp))
-
-                if (!isEditing) {
-                    FlowRow(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceEvenly,
-                        verticalArrangement = Arrangement.spacedBy(14.dp),
-                        maxItemsInEachRow = 3
-                    ) {
-                        for (app in memberApps) {
-                            LauncherAppTile(
-                                app = app,
-                                iconSizeDp = 54.dp,
-                                iconScale = 1.0f,
-                                iconShape = iconShape,
-                                showLabel = true,
-                                notificationCount = notificationCounts[app.packageName] ?: 0,
-                                labelColor = MaterialTheme.colorScheme.onSurface,
-                                onClick = { onLaunchApp(app) },
-                                onLongClick = {}
-                            )
+            // Authentic iOS Frosted Glass Folder Surface (3x3 Icon-Only Grid — Zero Internal Text)
+            FrostedGlassBox(
+                shape = RoundedCornerShape(38.dp),
+                alphaOverride = 0.56f,
+                showBorder = false,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 22.dp, vertical = 24.dp)
+                        .verticalScroll(rememberScrollState()),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    if (!isEditing) {
+                        FlowRow(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceEvenly,
+                            verticalArrangement = Arrangement.spacedBy(18.dp),
+                            maxItemsInEachRow = 3
+                        ) {
+                            for (app in memberApps) {
+                                LauncherAppTile(
+                                    app = app,
+                                    iconSizeDp = 58.dp,
+                                    iconScale = 1.0f,
+                                    iconShape = iconShape,
+                                    showLabel = false,
+                                    showCategoryBadge = false,
+                                    notificationCount = notificationCounts[app.packageName] ?: 0,
+                                    labelColor = Color.Transparent,
+                                    onClick = { onLaunchApp(app) },
+                                    onLongClick = {}
+                                )
+                            }
                         }
-                    }
-                } else {
-                    Text(
-                        text = "Select apps (4+ apps expands folder to Medium, 6+ apps expands to Large iOS Bento):",
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    FlowRow(
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        for (app in allApps) {
-                            val selected = app.packageName in selectedPackages
-                            FilterChip(
-                                selected = selected,
-                                onClick = {
-                                    selectedPackages = if (selected) {
-                                        selectedPackages - app.packageName
-                                    } else {
-                                        selectedPackages + app.packageName
-                                    }
-                                },
-                                label = { Text(app.appName) }
-                            )
+                    } else {
+                        FlowRow(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceEvenly,
+                            verticalArrangement = Arrangement.spacedBy(14.dp),
+                            maxItemsInEachRow = 4
+                        ) {
+                            for (app in allApps) {
+                                val selected = app.packageName in selectedPackages
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(18.dp))
+                                        .background(
+                                            if (selected) {
+                                                MaterialTheme.colorScheme.primary.copy(alpha = 0.34f)
+                                            } else {
+                                                Color.Transparent
+                                            }
+                                        )
+                                        .padding(4.dp)
+                                ) {
+                                    LauncherAppTile(
+                                        app = app,
+                                        iconSizeDp = 50.dp,
+                                        iconScale = if (selected) 1.0f else 0.86f,
+                                        iconShape = iconShape,
+                                        showLabel = false,
+                                        showCategoryBadge = false,
+                                        onClick = {
+                                            selectedPackages = if (selected) {
+                                                selectedPackages - app.packageName
+                                            } else {
+                                                selectedPackages + app.packageName
+                                            }
+                                        },
+                                        onLongClick = {}
+                                    )
+                                }
+                            }
                         }
-                    }
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Button(
-                        onClick = {
-                            onUpdateFolder(folder.id, editedName, selectedPackages.toList())
-                            isEditing = false
-                        },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("save_folder_apps_button")
-                    ) {
-                        Text("Save & Resize Folder (${selectedPackages.size} apps)")
                     }
                 }
             }
@@ -1039,11 +1071,18 @@ private fun CreateFolderModal(
                     onValueChange = { folderName = it },
                     label = { Text("Folder Name") },
                     singleLine = true,
+                    shape = RoundedCornerShape(18.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.42f),
+                        unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.28f),
+                        focusedBorderColor = Color.Transparent,
+                        unfocusedBorderColor = Color.Transparent
+                    ),
                     modifier = Modifier.fillMaxWidth()
                 )
                 Spacer(modifier = Modifier.height(10.dp))
                 Text(
-                    text = "Choose member apps (${chosenPackages.size} selected — 4+ makes a bigger folder):",
+                    text = "Choose member apps (${chosenPackages.size} selected):",
                     style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -1063,6 +1102,7 @@ private fun CreateFolderModal(
                                     chosenPackages + app.packageName
                                 }
                             },
+                            border = null,
                             label = { Text(app.appName) }
                         )
                     }
@@ -1152,7 +1192,7 @@ fun AppLongPressContextDialog(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    OutlinedButton(
+                    FilledTonalButton(
                         onClick = { onPinToHome(false) },
                         modifier = Modifier.weight(1f)
                     ) {
@@ -1160,7 +1200,7 @@ fun AppLongPressContextDialog(
                         Spacer(Modifier.width(4.dp))
                         Text("Add to Home")
                     }
-                    OutlinedButton(
+                    FilledTonalButton(
                         onClick = { onPinToHome(true) },
                         modifier = Modifier.weight(1f)
                     ) {
@@ -1173,7 +1213,7 @@ fun AppLongPressContextDialog(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        OutlinedButton(
+                        FilledTonalButton(
                             onClick = { onStartGridMove(homeItem) },
                             modifier = Modifier.weight(1f)
                         ) {
@@ -1181,7 +1221,7 @@ fun AppLongPressContextDialog(
                             Spacer(Modifier.width(4.dp))
                             Text("Move on Grid")
                         }
-                        OutlinedButton(
+                        FilledTonalButton(
                             onClick = { onRemoveFromHome(homeItem.id) },
                             modifier = Modifier.weight(1f)
                         ) {
@@ -1196,7 +1236,7 @@ fun AppLongPressContextDialog(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    OutlinedButton(
+                    FilledTonalButton(
                         onClick = {
                             try {
                                 val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
@@ -1214,7 +1254,7 @@ fun AppLongPressContextDialog(
                         Spacer(Modifier.width(4.dp))
                         Text("App Info")
                     }
-                    OutlinedButton(
+                    FilledTonalButton(
                         onClick = { showCustomizeFields = !showCustomizeFields },
                         modifier = Modifier.weight(1f)
                     ) {
@@ -1230,6 +1270,13 @@ fun AppLongPressContextDialog(
                         onValueChange = { customLabel = it },
                         label = { Text("Custom App Label") },
                         singleLine = true,
+                        shape = RoundedCornerShape(18.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.42f),
+                            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.28f),
+                            focusedBorderColor = Color.Transparent,
+                            unfocusedBorderColor = Color.Transparent
+                        ),
                         modifier = Modifier.fillMaxWidth()
                     )
                     OutlinedTextField(
@@ -1237,6 +1284,13 @@ fun AppLongPressContextDialog(
                         onValueChange = { customIconDrawable = it },
                         label = { Text("Icon Pack Drawable Override (optional)") },
                         singleLine = true,
+                        shape = RoundedCornerShape(18.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.42f),
+                            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.28f),
+                            focusedBorderColor = Color.Transparent,
+                            unfocusedBorderColor = Color.Transparent
+                        ),
                         modifier = Modifier.fillMaxWidth()
                     )
                     Button(
@@ -1264,6 +1318,7 @@ fun AppLongPressContextDialog(
                         FilterChip(
                             selected = isPrimary,
                             onClick = { onAssignPrimaryCategory(cat.id) },
+                            border = null,
                             label = { Text(cat.name) }
                         )
                     }
@@ -1283,6 +1338,7 @@ fun AppLongPressContextDialog(
                         FilterChip(
                             selected = isAssigned,
                             onClick = { onToggleAdditionalCategory(cat.id, !isAssigned) },
+                            border = null,
                             label = { Text("+ ${cat.name}") }
                         )
                     }

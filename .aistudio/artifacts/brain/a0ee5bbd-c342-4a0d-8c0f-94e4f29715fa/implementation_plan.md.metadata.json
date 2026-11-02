@@ -1,6 +1,6 @@
 {
-  "summary": "Implementation plan for restoring vertical swipe gestures (App Drawer & Unified Search), redesigning Home Screen folders as uniform circular frosted glass icons matching app icon dimensions, and enabling a 3-page horizontal Home Screen pager with main folders on Page 1 and extra apps on Pages 2 and 3.",
-  "updatedAt": "2026-11-02T17:59:42.222523894Z",
+  "summary": "Implementation plan for borderless frosted glass UI across the entire launcher (matching the 4-app home dock) and authentic iOS-style folders with all internal text removed except the folder title.",
+  "updatedAt": "2026-11-02T18:32:27.859191656Z",
   "requestFeedback": true,
   "userFacing": true
 }
