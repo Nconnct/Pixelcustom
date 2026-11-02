@@ -27,6 +27,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -52,9 +54,11 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -62,12 +66,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import com.example.domain.model.AppInfo
 import com.example.domain.model.CategoryModel
+import com.example.domain.model.DefaultCategory
 import com.example.domain.model.DrawerSortMode
 import com.example.domain.model.IconShapeOption
 import com.example.ui.components.FrostedGlassBox
@@ -93,6 +99,7 @@ fun AppDrawerSheet(
 ) {
     BackHandler(onBack = onCloseDrawer)
 
+    val focusManager = LocalFocusManager.current
     val settings = state.settings
     val iconShape = remember(settings.iconShape) {
         IconShapeOption.fromId(settings.iconShape)
@@ -100,34 +107,50 @@ fun AppDrawerSheet(
     val visibleCategories = remember(state.categories) {
         state.categories.filter { it.isVisibleInDrawer }
     }
-    val uncertainSuggestions = remember(filteredApps) {
-        filteredApps.filter { it.suggestedCategoryId != null && !it.isUserOverridden }.take(3)
+
+    // Local text state so typing in the drawer search bar is 100% instant and never drops characters
+    var localSearchText by remember { mutableStateOf(state.drawerSearchQuery) }
+    LaunchedEffect(state.drawerSearchQuery) {
+        if (localSearchText != state.drawerSearchQuery) {
+            localSearchText = state.drawerSearchQuery
+        }
     }
+
+    // Only show AI suggestion banner when viewing the "Uncategorized" tab
+    val uncertainSuggestions = remember(filteredApps, state.selectedCategoryId) {
+        if (state.selectedCategoryId == DefaultCategory.UNCATEGORIZED.id) {
+            filteredApps.filter { it.suggestedCategoryId != null && !it.isUserOverridden }.take(2)
+        } else {
+            emptyList()
+        }
+    }
+
+    val showConfidenceBadges = settings.drawerSortMode == DrawerSortMode.AI_CONFIDENCE.id
 
     var showSortDropdown by remember { mutableStateOf(false) }
     var showCategoryManagerModal by remember { mutableStateOf(false) }
 
-    FrostedGlassBox(
-        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
-        alphaOverride = settings.drawerBackgroundAlpha,
+    Surface(
+        color = MaterialTheme.colorScheme.background.copy(alpha = 0.96f),
+        contentColor = MaterialTheme.colorScheme.onBackground,
         modifier = modifier
             .fillMaxSize()
-            .windowInsetsPadding(WindowInsets.safeDrawing)
             .testTag("app_drawer_sheet")
     ) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
+                .windowInsetsPadding(WindowInsets.safeDrawing)
                 .windowInsetsPadding(WindowInsets.navigationBars)
-                .padding(top = 12.dp)
+                .padding(top = 8.dp)
         ) {
             // Drawer Handle Pill
             Box(
                 modifier = Modifier
                     .align(Alignment.CenterHorizontally)
-                    .size(width = 44.dp, height = 5.dp)
+                    .size(width = 40.dp, height = 4.dp)
                     .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f))
+                    .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.40f))
             )
 
             Spacer(modifier = Modifier.height(10.dp))
@@ -136,9 +159,9 @@ fun AppDrawerSheet(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp),
+                    .padding(horizontal = 14.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 IconButton(
                     onClick = onCloseDrawer,
@@ -152,24 +175,57 @@ fun AppDrawerSheet(
                 }
 
                 OutlinedTextField(
-                    value = state.drawerSearchQuery,
-                    onValueChange = onUpdateSearchQuery,
-                    placeholder = { Text("Search within category…") },
+                    value = localSearchText,
+                    onValueChange = { newText ->
+                        localSearchText = newText
+                        onUpdateSearchQuery(newText)
+                    },
+                    placeholder = {
+                        Text(
+                            text = "Search apps…",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    },
                     leadingIcon = {
-                        Icon(Icons.Default.Search, contentDescription = null)
+                        Icon(
+                            imageVector = Icons.Default.Search,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary
+                        )
                     },
                     trailingIcon = {
-                        if (state.drawerSearchQuery.isNotEmpty()) {
-                            IconButton(onClick = { onUpdateSearchQuery("") }) {
-                                Icon(Icons.Default.Close, contentDescription = "Clear search")
+                        if (localSearchText.isNotEmpty()) {
+                            IconButton(
+                                onClick = {
+                                    localSearchText = ""
+                                    onUpdateSearchQuery("")
+                                }
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = "Clear search",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
                             }
                         }
                     },
                     singleLine = true,
-                    shape = RoundedCornerShape(24.dp),
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                    keyboardActions = KeyboardActions(
+                        onSearch = {
+                            focusManager.clearFocus()
+                            filteredApps.firstOrNull()?.let { onLaunchApp(it) }
+                        }
+                    ),
+                    shape = RoundedCornerShape(26.dp),
                     colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                        unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
+                        cursorColor = MaterialTheme.colorScheme.primary,
+                        focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
+                        unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.38f),
                         focusedBorderColor = MaterialTheme.colorScheme.primary,
-                        unfocusedBorderColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.22f)
+                        unfocusedBorderColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.16f)
                     ),
                     modifier = Modifier
                         .weight(1f)
@@ -245,11 +301,11 @@ fun AppDrawerSheet(
                         val isSelected = cat.id == state.selectedCategoryId
                         FrostedGlassBox(
                             shape = RoundedCornerShape(20.dp),
-                            alphaOverride = if (isSelected) 0.92f else 0.52f,
+                            alphaOverride = if (isSelected) 0.95f else 0.55f,
                             tintOverride = if (isSelected) {
                                 MaterialTheme.colorScheme.primaryContainer
                             } else {
-                                null
+                                MaterialTheme.colorScheme.surfaceVariant
                             },
                             modifier = Modifier
                                 .clickable { onSelectCategory(cat.id) }
@@ -270,23 +326,12 @@ fun AppDrawerSheet(
                                     },
                                     fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
                                 )
-                                Box(
-                                    modifier = Modifier
-                                        .clip(CircleShape)
-                                        .background(
-                                            if (isSelected) {
-                                                MaterialTheme.colorScheme.primary
-                                            } else {
-                                                MaterialTheme.colorScheme.surfaceVariant
-                                            }
-                                        )
-                                        .padding(horizontal = 6.dp, vertical = 2.dp)
-                                ) {
+                                if (cat.appCount > 0) {
                                     Text(
-                                        text = cat.appCount.toString(),
+                                        text = "${cat.appCount}",
                                         style = MaterialTheme.typography.labelSmall,
                                         color = if (isSelected) {
-                                            MaterialTheme.colorScheme.onPrimary
+                                            MaterialTheme.colorScheme.primary
                                         } else {
                                             MaterialTheme.colorScheme.onSurfaceVariant
                                         }
@@ -298,7 +343,7 @@ fun AppDrawerSheet(
                 }
             }
 
-            // Offline AI Uncertain Category Suggestion Banner
+            // Offline AI Uncertain Category Suggestion Banner (shown in Uncategorized tab)
             if (uncertainSuggestions.isNotEmpty()) {
                 Spacer(modifier = Modifier.height(8.dp))
                 Column(
@@ -316,7 +361,7 @@ fun AppDrawerSheet(
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                                    .padding(horizontal = 12.dp, vertical = 6.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
@@ -329,10 +374,10 @@ fun AppDrawerSheet(
                                         imageVector = Icons.Default.AutoAwesome,
                                         contentDescription = null,
                                         tint = MaterialTheme.colorScheme.secondary,
-                                        modifier = Modifier.size(18.dp)
+                                        modifier = Modifier.size(16.dp)
                                     )
                                     Text(
-                                        text = "Offline AI suggests '${suggestedApp.suggestedCategoryName}' for ${suggestedApp.appName}",
+                                        text = "Move ${suggestedApp.appName} to '${suggestedApp.suggestedCategoryName}'?",
                                         style = MaterialTheme.typography.bodyMedium,
                                         color = MaterialTheme.colorScheme.onSurface
                                     )
@@ -361,17 +406,21 @@ fun AppDrawerSheet(
                             imageVector = Icons.Default.Category,
                             contentDescription = null,
                             tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(48.dp)
+                            modifier = Modifier.size(44.dp)
                         )
                         Spacer(modifier = Modifier.height(12.dp))
                         Text(
-                            text = "No applications in this category yet",
+                            text = if (localSearchText.isNotBlank()) {
+                                "No apps matching \"$localSearchText\""
+                            } else {
+                                "No apps in this category yet"
+                            },
                             style = MaterialTheme.typography.titleMedium,
                             color = MaterialTheme.colorScheme.onSurface
                         )
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
-                            text = "Long-press any app in 'All Apps' to assign it here or adjust your search filter.",
+                            text = "Long-press any app in 'All Apps' to assign it to this category.",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -380,8 +429,8 @@ fun AppDrawerSheet(
             } else {
                 LazyVerticalGrid(
                     columns = GridCells.Fixed(settings.drawerGridColumns.coerceIn(3, 6)),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 12.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     modifier = Modifier
                         .weight(1f)
@@ -395,7 +444,8 @@ fun AppDrawerSheet(
                             iconScale = settings.iconScale,
                             iconShape = iconShape,
                             showLabel = settings.showDrawerAppLabels,
-                            showCategoryBadge = true,
+                            showCategoryBadge = showConfidenceBadges,
+                            labelColor = MaterialTheme.colorScheme.onSurface,
                             onClick = { onLaunchApp(app) },
                             onLongClick = { onLongPressApp(app) }
                         )
@@ -440,7 +490,6 @@ private fun CategoryManagerModal(
                     .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                // Add / Rename Custom Category Bar
                 OutlinedTextField(
                     value = categoryNameInput,
                     onValueChange = { categoryNameInput = it },

@@ -39,6 +39,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CreateNewFolder
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.OpenWith
 import androidx.compose.material.icons.filled.PushPin
@@ -95,22 +96,18 @@ import kotlinx.coroutines.launch
 fun HomeScreenContent(
     state: LauncherUiState,
     widgetHostController: WidgetHostController,
+    movingHomeItem: HomeScreenItemModel?,
+    onCancelMoveMode: () -> Unit,
     onOpenOverlay: (ActiveOverlaySheet) -> Unit,
     onLaunchApp: (AppInfo) -> Unit,
     onOpenFolder: (Long) -> Unit,
     onCloseFolder: () -> Unit,
     onOpenAppContextMenu: (AppInfo, HomeScreenItemModel?) -> Unit,
-    onDismissAppContextMenu: () -> Unit,
-    onAssignCategory: (String, String, Boolean) -> Unit,
-    onToggleMultiCategory: (String, String, Boolean) -> Unit,
-    onToggleFavorite: (String) -> Unit,
-    onPinToHome: (String, Boolean) -> Unit,
     onRemoveHomeItem: (Long) -> Unit,
     onMoveHomeItem: (Long, Int, Int, Int, Boolean) -> Unit,
     onCreateSmartFolder: (String, List<String>, String, Int) -> Unit,
     onUpdateFolder: (Long, String, List<String>) -> Unit,
     onDeleteFolder: (Long) -> Unit,
-    onCustomizeAppAppearance: (String, String?, String?) -> Unit,
     onUndoLayout: () -> Unit,
     onRequestDefaultHome: () -> Unit,
     modifier: Modifier = Modifier
@@ -120,7 +117,6 @@ fun HomeScreenContent(
     val pagerState = rememberPagerState(initialPage = 0, pageCount = { pageCount })
     val coroutineScope = rememberCoroutineScope()
 
-    var movingHomeItem by remember { mutableStateOf<HomeScreenItemModel?>(null) }
     var showHomeLongPressDialog by remember { mutableStateOf(false) }
     var showCreateFolderDialog by remember { mutableStateOf(false) }
 
@@ -142,19 +138,20 @@ fun HomeScreenContent(
         modifier = modifier
             .fillMaxSize()
             .windowInsetsPadding(WindowInsets.safeDrawing)
-            .pointerInput(settings.swipeUpAction, settings.swipeDownAction) {
+            .pointerInput(settings.swipeUpAction, settings.swipeDownAction, state.openedFolder) {
+                if (state.openedFolder != null) return@pointerInput
                 var accumulatedDy = 0f
                 detectVerticalDragGestures(
                     onDragStart = { accumulatedDy = 0f },
                     onVerticalDrag = { _, dragAmount -> accumulatedDy += dragAmount },
                     onDragEnd = {
-                        if (accumulatedDy < -90f) {
+                        if (accumulatedDy < -120f) {
                             when (settings.swipeUpAction) {
                                 "OPEN_SEARCH" -> onOpenOverlay(ActiveOverlaySheet.UNIFIED_SEARCH)
                                 "AI_ORGANIZE_PREVIEW" -> onOpenOverlay(ActiveOverlaySheet.AI_ORGANIZER_PREVIEW)
                                 else -> onOpenOverlay(ActiveOverlaySheet.APP_DRAWER)
                             }
-                        } else if (accumulatedDy > 90f) {
+                        } else if (accumulatedDy > 130f) {
                             when (settings.swipeDownAction) {
                                 "OPEN_DRAWER" -> onOpenOverlay(ActiveOverlaySheet.APP_DRAWER)
                                 else -> onOpenOverlay(ActiveOverlaySheet.UNIFIED_SEARCH)
@@ -163,15 +160,8 @@ fun HomeScreenContent(
                     }
                 )
             }
-            .pointerInput(settings.doubleTapAction, settings.longPressAction) {
+            .pointerInput(Unit) {
                 detectTapGestures(
-                    onDoubleTap = {
-                        when (settings.doubleTapAction) {
-                            "OPEN_SEARCH" -> onOpenOverlay(ActiveOverlaySheet.UNIFIED_SEARCH)
-                            "OPEN_DRAWER" -> onOpenOverlay(ActiveOverlaySheet.APP_DRAWER)
-                            else -> onOpenOverlay(ActiveOverlaySheet.AI_ORGANIZER_PREVIEW)
-                        }
-                    },
                     onLongPress = {
                         showHomeLongPressDialog = true
                     }
@@ -207,17 +197,17 @@ fun HomeScreenContent(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                            .padding(horizontal = 12.dp, vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Text(
-                            text = "Tap any highlighted grid cell or dock slot to move '${movingHomeItem?.customLabel ?: "Item"}'",
+                            text = "Tap any highlighted slot to place '${movingHomeItem.customLabel ?: "Item"}'",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurface,
                             modifier = Modifier.weight(1f)
                         )
-                        TextButton(onClick = { movingHomeItem = null }) {
+                        TextButton(onClick = onCancelMoveMode) {
                             Text("Cancel")
                         }
                     }
@@ -226,7 +216,7 @@ fun HomeScreenContent(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp),
+                        .padding(horizontal = 20.dp),
                     horizontalArrangement = Arrangement.End
                 ) {
                     FrostedGlassBox(
@@ -237,7 +227,7 @@ fun HomeScreenContent(
                             .testTag("home_undo_layout_chip")
                     ) {
                         Row(
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
@@ -245,10 +235,10 @@ fun HomeScreenContent(
                                 imageVector = Icons.Default.Undo,
                                 contentDescription = "Undo layout",
                                 tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(15.dp)
+                                modifier = Modifier.size(14.dp)
                             )
                             Text(
-                                text = "Undo AI Layout",
+                                text = "Undo Layout",
                                 style = MaterialTheme.typography.labelLarge,
                                 color = MaterialTheme.colorScheme.onSurface
                             )
@@ -275,17 +265,16 @@ fun HomeScreenContent(
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                        .padding(horizontal = 12.dp, vertical = 4.dp),
                     verticalArrangement = Arrangement.SpaceEvenly
                 ) {
-                    // Render any active widgets on this page
                     for (widgetItem in widgetsOnPage) {
                         FrostedGlassBox(
                             shape = RoundedCornerShape(20.dp),
                             alphaOverride = 0.65f,
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(104.dp)
+                                .height(96.dp)
                                 .padding(vertical = 4.dp)
                                 .testTag("home_widget_${widgetItem.id}")
                         ) {
@@ -314,7 +303,7 @@ fun HomeScreenContent(
                                                 imageVector = Icons.Default.Widgets,
                                                 contentDescription = null,
                                                 tint = MaterialTheme.colorScheme.primary,
-                                                modifier = Modifier.size(28.dp)
+                                                modifier = Modifier.size(26.dp)
                                             )
                                             Column {
                                                 Text(
@@ -342,7 +331,6 @@ fun HomeScreenContent(
                         }
                     }
 
-                    // Render Workspace Grid Rows x Columns
                     val startRow = if (pageIndex == 0 && settings.showAtAGlanceWidget) 1 else 0
                     for (r in startRow until settings.homeGridRows) {
                         Row(
@@ -372,11 +360,8 @@ fun HomeScreenContent(
                                                         RoundedCornerShape(14.dp)
                                                     )
                                                     .clickable {
-                                                        val target = movingHomeItem
-                                                        if (target != null) {
-                                                            onMoveHomeItem(target.id, pageIndex, r, c, false)
-                                                            movingHomeItem = null
-                                                        }
+                                                        onMoveHomeItem(movingHomeItem.id, pageIndex, r, c, false)
+                                                        onCancelMoveMode()
                                                     }
                                             } else {
                                                 Modifier
@@ -394,10 +379,11 @@ fun HomeScreenContent(
                                                     iconScale = settings.iconScale,
                                                     iconShape = iconShape,
                                                     showLabel = settings.showHomeIconLabels,
+                                                    labelColor = Color.White,
                                                     onClick = {
                                                         if (movingHomeItem != null) {
-                                                            onMoveHomeItem(movingHomeItem!!.id, pageIndex, r, c, false)
-                                                            movingHomeItem = null
+                                                            onMoveHomeItem(movingHomeItem.id, pageIndex, r, c, false)
+                                                            onCancelMoveMode()
                                                         } else {
                                                             onLaunchApp(app)
                                                         }
@@ -420,8 +406,8 @@ fun HomeScreenContent(
                                                     showLabel = settings.showHomeIconLabels,
                                                     onClick = {
                                                         if (movingHomeItem != null) {
-                                                            onMoveHomeItem(movingHomeItem!!.id, pageIndex, r, c, false)
-                                                            movingHomeItem = null
+                                                            onMoveHomeItem(movingHomeItem.id, pageIndex, r, c, false)
+                                                            onCancelMoveMode()
                                                         } else {
                                                             onOpenFolder(folder.id)
                                                         }
@@ -455,10 +441,10 @@ fun HomeScreenContent(
                     Box(
                         modifier = Modifier
                             .padding(horizontal = 4.dp)
-                            .size(width = if (isSelected) 20.dp else 7.dp, height = 7.dp)
+                            .size(width = if (isSelected) 18.dp else 6.dp, height = 6.dp)
                             .clip(CircleShape)
                             .background(
-                                if (isSelected) Color.White else Color.White.copy(alpha = 0.38f)
+                                if (isSelected) Color.White else Color.White.copy(alpha = 0.35f)
                             )
                             .clickable {
                                 coroutineScope.launch { pagerState.animateScrollToPage(i) }
@@ -474,17 +460,17 @@ fun HomeScreenContent(
                 }
 
                 FrostedGlassBox(
-                    shape = RoundedCornerShape(28.dp),
+                    shape = RoundedCornerShape(26.dp),
                     alphaOverride = settings.dockTransparency,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 6.dp)
+                        .padding(horizontal = 16.dp, vertical = 4.dp)
                         .testTag("home_frosted_dock")
                 ) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 10.dp, vertical = 8.dp),
+                            .padding(horizontal = 10.dp, vertical = 6.dp),
                         horizontalArrangement = Arrangement.SpaceEvenly,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
@@ -506,17 +492,14 @@ fun HomeScreenContent(
                                                     RoundedCornerShape(14.dp)
                                                 )
                                                 .clickable {
-                                                    val target = movingHomeItem
-                                                    if (target != null) {
-                                                        onMoveHomeItem(
-                                                            target.id,
-                                                            0,
-                                                            settings.homeGridRows - 1,
-                                                            dockSlot,
-                                                            true
-                                                        )
-                                                        movingHomeItem = null
-                                                    }
+                                                    onMoveHomeItem(
+                                                        movingHomeItem.id,
+                                                        0,
+                                                        settings.homeGridRows - 1,
+                                                        dockSlot,
+                                                        true
+                                                    )
+                                                    onCancelMoveMode()
                                                 }
                                         } else {
                                             Modifier
@@ -534,13 +517,13 @@ fun HomeScreenContent(
                                         onClick = {
                                             if (movingHomeItem != null) {
                                                 onMoveHomeItem(
-                                                    movingHomeItem!!.id,
+                                                    movingHomeItem.id,
                                                     0,
                                                     settings.homeGridRows - 1,
                                                     dockSlot,
                                                     true
                                                 )
-                                                movingHomeItem = null
+                                                onCancelMoveMode()
                                             } else {
                                                 onLaunchApp(dockApp)
                                             }
@@ -573,7 +556,7 @@ fun HomeScreenContent(
                     onSearchBarClick = { onOpenOverlay(ActiveOverlaySheet.UNIFIED_SEARCH) },
                     onOpenDrawerClick = { onOpenOverlay(ActiveOverlaySheet.APP_DRAWER) },
                     onOpenAiOrganizerClick = { onOpenOverlay(ActiveOverlaySheet.AI_ORGANIZER_PREVIEW) },
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
                 )
             }
         }
@@ -595,33 +578,6 @@ fun HomeScreenContent(
             )
         }
 
-        // --- App Long-Press Context Menu Modal ---
-        val contextApp = state.contextMenuApp
-        if (contextApp != null) {
-            AppLongPressContextDialog(
-                app = contextApp,
-                homeItem = state.contextMenuHomeItem,
-                categories = state.categories,
-                onDismiss = onDismissAppContextMenu,
-                onAssignPrimaryCategory = { catId ->
-                    onAssignCategory(contextApp.packageName, catId, false)
-                },
-                onToggleAdditionalCategory = { catId, assigned ->
-                    onToggleMultiCategory(contextApp.packageName, catId, assigned)
-                },
-                onToggleFavorite = { onToggleFavorite(contextApp.packageName) },
-                onPinToHome = { toDock -> onPinToHome(contextApp.packageName, toDock) },
-                onStartGridMove = { item ->
-                    movingHomeItem = item
-                    onDismissAppContextMenu()
-                },
-                onRemoveFromHome = { itemId -> onRemoveHomeItem(itemId) },
-                onSaveCustomAppearance = { label, iconKey ->
-                    onCustomizeAppAppearance(contextApp.packageName, label, iconKey)
-                }
-            )
-        }
-
         // --- Empty Workspace Long-Press Action Menu ---
         if (showHomeLongPressDialog) {
             AlertDialog(
@@ -629,6 +585,21 @@ fun HomeScreenContent(
                 title = { Text("Home Screen Options") },
                 text = {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        if (!state.isDefaultHomeLauncher) {
+                            Button(
+                                onClick = {
+                                    showHomeLongPressDialog = false
+                                    onRequestDefaultHome()
+                                },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("menu_set_default_home")
+                            ) {
+                                Icon(Icons.Default.Home, contentDescription = null)
+                                Spacer(Modifier.width(8.dp))
+                                Text("Set as Default Home Launcher")
+                            }
+                        }
                         OutlinedButton(
                             onClick = {
                                 showHomeLongPressDialog = false
@@ -730,7 +701,7 @@ private fun FolderDetailModal(
     Dialog(onDismissRequest = onDismiss) {
         FrostedGlassBox(
             shape = RoundedCornerShape(28.dp),
-            alphaOverride = 0.90f,
+            alphaOverride = 0.94f,
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(8.dp)
@@ -796,6 +767,7 @@ private fun FolderDetailModal(
                                 iconScale = 1.0f,
                                 iconShape = iconShape,
                                 showLabel = true,
+                                labelColor = MaterialTheme.colorScheme.onSurface,
                                 onClick = { onLaunchApp(app) },
                                 onLongClick = {}
                             )
@@ -958,7 +930,6 @@ fun AppLongPressContextDialog(
                     .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                // Quick Actions
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -1003,7 +974,6 @@ fun AppLongPressContextDialog(
                     }
                 }
 
-                // System App Info & Customize
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)

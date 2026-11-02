@@ -24,7 +24,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.AutoAwesome
-import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.Icon
@@ -79,7 +78,7 @@ fun PixelWallpaperBackground(
             else -> if (isDark) {
                 listOf(Color(0xFF090D16), Color(0xFF13203C), Color(0xFF1E3A8A), Color(0xFF0F766E))
             } else {
-                listOf(Color(0xFFDBEAFE), Color(0xFFBFDBFE), Color(0xFF93C5FD), Color(0xFFA7F3D0))
+                listOf(Color(0xFF1E293B), Color(0xFF334155), Color(0xFF2563EB), Color(0xFF0D9488))
             }
         }
     }
@@ -96,7 +95,7 @@ fun PixelWallpaperBackground(
         )
         drawCircle(
             brush = Brush.radialGradient(
-                colors = listOf(palette[2].copy(alpha = 0.45f), Color.Transparent),
+                colors = listOf(palette[2].copy(alpha = 0.40f), Color.Transparent),
                 center = Offset(w * 0.82f, h * 0.22f),
                 radius = w * 0.72f
             ),
@@ -105,7 +104,7 @@ fun PixelWallpaperBackground(
         )
         drawCircle(
             brush = Brush.radialGradient(
-                colors = listOf(palette[3].copy(alpha = 0.28f), Color.Transparent),
+                colors = listOf(palette[3].copy(alpha = 0.24f), Color.Transparent),
                 center = Offset(w * 0.18f, h * 0.68f),
                 radius = w * 0.65f
             ),
@@ -127,7 +126,7 @@ fun FrostedGlassBox(
     content: @Composable () -> Unit
 ) {
     val tokens = LocalLauncherTokens.current
-    val surfaceAlpha = (alphaOverride ?: tokens.frostedSurfaceAlpha).coerceIn(0.25f, 0.96f)
+    val surfaceAlpha = (alphaOverride ?: tokens.frostedSurfaceAlpha).coerceIn(0.25f, 0.98f)
     val baseColor = tintOverride ?: tokens.surfaceColor
     val borderColor = if (tokens.isDarkTheme) FrostedBorderDark else FrostedBorderLight
 
@@ -137,7 +136,7 @@ fun FrostedGlassBox(
             .background(
                 brush = Brush.verticalGradient(
                     colors = listOf(
-                        baseColor.copy(alpha = (surfaceAlpha + 0.06f).coerceAtMost(0.97f)),
+                        baseColor.copy(alpha = (surfaceAlpha + 0.05f).coerceAtMost(0.98f)),
                         baseColor.copy(alpha = surfaceAlpha)
                     )
                 )
@@ -149,8 +148,7 @@ fun FrostedGlassBox(
 }
 
 /**
- * Pixel At-a-Glance Header Widget displaying current date, offline AI categorization status,
- * quick AI Organize trigger, and Set Default Home button when not yet default.
+ * Clean, Pixel-authentic At-a-Glance Header Widget.
  */
 @Composable
 fun PixelAtAGlanceHeader(
@@ -163,136 +161,93 @@ fun PixelAtAGlanceHeader(
     modifier: Modifier = Modifier
 ) {
     val dateText = remember {
-        SimpleDateFormat("EEEE, MMM d", Locale.getDefault()).format(Date())
+        SimpleDateFormat("EEE, MMM d", Locale.getDefault()).format(Date())
     }
 
-    Column(
+    Row(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp)
-            .testTag("pixel_at_a_glance_header")
+            .padding(horizontal = 20.dp, vertical = 10.dp)
+            .testTag("pixel_at_a_glance_header"),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = dateText,
-                    style = MaterialTheme.typography.headlineMedium,
-                    color = Color.White,
-                    fontWeight = FontWeight.SemiBold
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = dateText,
+                style = MaterialTheme.typography.headlineMedium,
+                color = Color.White,
+                fontWeight = FontWeight.SemiBold
+            )
+            Spacer(modifier = Modifier.height(2.dp))
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.AutoAwesome,
+                    contentDescription = null,
+                    tint = Color(0xFF81C995),
+                    modifier = Modifier.size(13.dp)
                 )
-                Spacer(modifier = Modifier.height(2.dp))
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.AutoAwesome,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.secondary,
-                        modifier = Modifier.size(14.dp)
-                    )
-                    Text(
-                        text = "$categorizedCount/$totalAppsCount apps categorized • 100% Offline AI",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = Color.White.copy(alpha = 0.85f)
-                    )
-                }
-            }
-
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FrostedGlassBox(
-                    shape = CircleShape,
-                    alphaOverride = 0.62f,
-                    modifier = Modifier
-                        .minimumInteractiveComponentSize()
-                        .clickable(onClick = onOpenAiOrganizer)
-                        .testTag("ai_organize_header_button")
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.AutoAwesome,
-                            contentDescription = stringResource(R.string.ai_organize_title),
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Text(
-                            text = "AI Arrange",
-                            style = MaterialTheme.typography.labelLarge,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                    }
-                }
-
-                IconButton(
-                    onClick = onOpenSettings,
-                    modifier = Modifier
-                        .minimumInteractiveComponentSize()
-                        .testTag("home_settings_button")
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Tune,
-                        contentDescription = stringResource(R.string.settings_title),
-                        tint = Color.White
-                    )
-                }
+                Text(
+                    text = "$categorizedCount/$totalAppsCount Categorized • Offline AI",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = Color.White.copy(alpha = 0.80f)
+                )
             }
         }
 
-        if (!isDefaultHome) {
-            Spacer(modifier = Modifier.height(8.dp))
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
             FrostedGlassBox(
-                shape = RoundedCornerShape(16.dp),
-                alphaOverride = 0.68f,
+                shape = CircleShape,
+                alphaOverride = 0.58f,
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable(onClick = onRequestDefaultHome)
-                    .testTag("set_default_home_banner")
+                    .minimumInteractiveComponentSize()
+                    .clickable(onClick = onOpenAiOrganizer)
+                    .testTag("ai_organize_header_button")
             ) {
                 Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 14.dp, vertical = 8.dp),
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
+                    horizontalArrangement = Arrangement.spacedBy(5.dp)
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Home,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Text(
-                            text = "Set PixelCategory as your default Home Launcher",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                    }
+                    Icon(
+                        imageVector = Icons.Default.AutoAwesome,
+                        contentDescription = stringResource(R.string.ai_organize_title),
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(16.dp)
+                    )
                     Text(
-                        text = "Enable",
+                        text = "Arrange",
                         style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.primary,
-                        fontWeight = FontWeight.Bold
+                        color = MaterialTheme.colorScheme.onSurface
                     )
                 }
+            }
+
+            IconButton(
+                onClick = onOpenSettings,
+                modifier = Modifier
+                    .size(42.dp)
+                    .testTag("home_settings_button")
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Tune,
+                    contentDescription = stringResource(R.string.settings_title),
+                    tint = Color.White.copy(alpha = 0.90f),
+                    modifier = Modifier.size(22.dp)
+                )
             }
         }
     }
 }
 
 /**
- * Pixel-style Frosted Bottom Search Pill with quick access to Unified Search and App Drawer.
+ * Pixel-style Frosted Bottom Search Pill with immediate Unified Search and App Drawer triggers.
  */
 @Composable
 fun PixelBottomSearchBar(
@@ -308,27 +263,32 @@ fun PixelBottomSearchBar(
         alphaOverride = tokens.frostedSurfaceAlpha,
         modifier = modifier
             .fillMaxWidth()
-            .height(54.dp)
-            .clickable(onClick = onSearchBarClick)
+            .height(52.dp)
             .testTag("pixel_bottom_search_bar")
     ) {
         Row(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(horizontal = 16.dp),
+                .padding(horizontal = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
+            // Tapping the main search area opens Unified Search and focuses the input field
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
-                modifier = Modifier.weight(1f)
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxSize()
+                    .clip(RoundedCornerShape(tokens.searchCornerRadius))
+                    .clickable(onClick = onSearchBarClick)
+                    .padding(horizontal = 12.dp)
             ) {
                 Icon(
                     imageVector = Icons.Default.Search,
                     contentDescription = "Search",
                     tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(22.dp)
+                    modifier = Modifier.size(21.dp)
                 )
                 Text(
                     text = stringResource(R.string.search_hint),
@@ -339,36 +299,18 @@ fun PixelBottomSearchBar(
                 )
             }
 
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            IconButton(
+                onClick = onOpenDrawerClick,
+                modifier = Modifier
+                    .size(44.dp)
+                    .testTag("open_app_drawer_button")
             ) {
-                IconButton(
-                    onClick = onOpenAiOrganizerClick,
-                    modifier = Modifier
-                        .size(48.dp)
-                        .testTag("search_bar_ai_button")
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.AutoAwesome,
-                        contentDescription = "AI Auto-Organize",
-                        tint = MaterialTheme.colorScheme.secondary,
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
-                IconButton(
-                    onClick = onOpenDrawerClick,
-                    modifier = Modifier
-                        .size(48.dp)
-                        .testTag("open_app_drawer_button")
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Apps,
-                        contentDescription = stringResource(R.string.drawer_title),
-                        tint = MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier.size(22.dp)
-                    )
-                }
+                Icon(
+                    imageVector = Icons.Default.Apps,
+                    contentDescription = stringResource(R.string.drawer_title),
+                    tint = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.size(22.dp)
+                )
             }
         }
     }
@@ -399,8 +341,7 @@ fun resolveIconShape(option: IconShapeOption): Shape {
 }
 
 /**
- * Reusable App Icon + Label tile supporting custom icon shapes, scaling, AI confidence badges,
- * and click + long-press interactions.
+ * Clean, responsive App Icon + Label tile.
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -411,12 +352,13 @@ fun LauncherAppTile(
     iconShape: IconShapeOption,
     showLabel: Boolean,
     showCategoryBadge: Boolean = false,
+    labelColor: Color = Color.White,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val shape = remember(iconShape) { resolveIconShape(iconShape) }
-    val scaledSize = (iconSizeDp.value * iconScale.coerceIn(0.75f, 1.30f)).dp
+    val scaledSize = (iconSizeDp.value * iconScale.coerceIn(0.75f, 1.25f)).dp
 
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -428,14 +370,14 @@ fun LauncherAppTile(
                 onClick = onClick,
                 onLongClick = onLongClick
             )
-            .padding(vertical = 6.dp, horizontal = 4.dp)
+            .padding(vertical = 4.dp, horizontal = 4.dp)
             .testTag("app_tile_${app.packageName}")
     ) {
         Box(contentAlignment = Alignment.BottomEnd) {
             Surface(
                 shape = shape,
-                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
-                tonalElevation = 4.dp,
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                tonalElevation = 2.dp,
                 modifier = Modifier.size(scaledSize)
             ) {
                 if (app.appIcon != null) {
@@ -489,15 +431,15 @@ fun LauncherAppTile(
         }
 
         if (showLabel) {
-            Spacer(modifier = Modifier.height(5.dp))
+            Spacer(modifier = Modifier.height(4.dp))
             Text(
                 text = app.appName,
                 style = MaterialTheme.typography.labelLarge,
-                color = Color.White,
+                color = labelColor,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 textAlign = TextAlign.Center,
-                modifier = Modifier.width(76.dp)
+                modifier = Modifier.width(74.dp)
             )
         }
     }
@@ -527,7 +469,7 @@ fun LauncherFolderTile(
                 onClick = onClick,
                 onLongClick = onLongClick
             )
-            .padding(vertical = 6.dp, horizontal = 4.dp)
+            .padding(vertical = 4.dp, horizontal = 4.dp)
             .testTag("folder_tile_${folder.id}")
     ) {
         FrostedGlassBox(
@@ -578,7 +520,7 @@ fun LauncherFolderTile(
         }
 
         if (showLabel) {
-            Spacer(modifier = Modifier.height(5.dp))
+            Spacer(modifier = Modifier.height(4.dp))
             Text(
                 text = folder.folderName,
                 style = MaterialTheme.typography.labelLarge,
@@ -586,7 +528,7 @@ fun LauncherFolderTile(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 textAlign = TextAlign.Center,
-                modifier = Modifier.width(78.dp)
+                modifier = Modifier.width(74.dp)
             )
         }
     }

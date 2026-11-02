@@ -9,8 +9,6 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.spring
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
@@ -35,17 +33,21 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.domain.model.HomeScreenItemModel
 import com.example.ui.components.FrostedGlassBox
 import com.example.ui.components.PixelWallpaperBackground
 import com.example.ui.screens.AiLayoutPreviewSheet
 import com.example.ui.screens.AppDrawerSheet
+import com.example.ui.screens.AppLongPressContextDialog
 import com.example.ui.screens.HomeScreenContent
 import com.example.ui.screens.SettingsAndCustomizationSheet
 import com.example.ui.screens.UnifiedSearchSheet
@@ -114,6 +116,8 @@ fun PixelCategoryLauncherRoot(
     val context = LocalContext.current
     val tokens = LocalLauncherTokens.current
 
+    var movingHomeItem by remember { mutableStateOf<HomeScreenItemModel?>(null) }
+
     val homeRoleLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
     ) {
@@ -134,10 +138,9 @@ fun PixelCategoryLauncherRoot(
         }
     }
 
-    // Auto-dismiss transient toast banner after 3.5 seconds
     LaunchedEffect(uiState.statusBannerMessage) {
         if (uiState.statusBannerMessage != null) {
-            delay(3500)
+            delay(3000)
             viewModel.showBanner(null)
         }
     }
@@ -162,38 +165,37 @@ fun PixelCategoryLauncherRoot(
             isDark = tokens.isDarkTheme
         )
 
-        // 2. Main Home Screen Workspace, Folders, Widgets, Dock & Search Pill
-        HomeScreenContent(
-            state = uiState,
-            widgetHostController = viewModel.widgetHostController,
-            onOpenOverlay = viewModel::openOverlay,
-            onLaunchApp = viewModel::launchApp,
-            onOpenFolder = viewModel::openFolder,
-            onCloseFolder = viewModel::closeFolder,
-            onOpenAppContextMenu = viewModel::openAppContextMenu,
-            onDismissAppContextMenu = viewModel::dismissAppContextMenu,
-            onAssignCategory = viewModel::assignAppCategory,
-            onToggleMultiCategory = viewModel::toggleAdditionalCategory,
-            onToggleFavorite = viewModel::toggleAppFavorite,
-            onPinToHome = viewModel::pinAppToHome,
-            onRemoveHomeItem = viewModel::removeShortcutFromHome,
-            onMoveHomeItem = viewModel::moveHomeItem,
-            onCreateSmartFolder = viewModel::createSmartFolder,
-            onUpdateFolder = viewModel::updateFolder,
-            onDeleteFolder = viewModel::deleteFolder,
-            onCustomizeAppAppearance = viewModel::setCustomAppIconOrLabel,
-            onUndoLayout = viewModel::undoLastLayoutChange,
-            onRequestDefaultHome = requestDefaultHomeAction
-        )
+        // 2. Main Home Screen Workspace (Rendered only when no full-screen overlay sheet is open so screens never overlap!)
+        AnimatedVisibility(
+            visible = uiState.activeOverlay == ActiveOverlaySheet.NONE,
+            enter = fadeIn(),
+            exit = fadeOut()
+        ) {
+            HomeScreenContent(
+                state = uiState,
+                widgetHostController = viewModel.widgetHostController,
+                movingHomeItem = movingHomeItem,
+                onCancelMoveMode = { movingHomeItem = null },
+                onOpenOverlay = viewModel::openOverlay,
+                onLaunchApp = viewModel::launchApp,
+                onOpenFolder = viewModel::openFolder,
+                onCloseFolder = viewModel::closeFolder,
+                onOpenAppContextMenu = viewModel::openAppContextMenu,
+                onRemoveHomeItem = viewModel::removeShortcutFromHome,
+                onMoveHomeItem = viewModel::moveHomeItem,
+                onCreateSmartFolder = viewModel::createSmartFolder,
+                onUpdateFolder = viewModel::updateFolder,
+                onDeleteFolder = viewModel::deleteFolder,
+                onUndoLayout = viewModel::undoLastLayoutChange,
+                onRequestDefaultHome = requestDefaultHomeAction
+            )
+        }
 
-        // 3. Smooth Spring-Animated Overlay Sheets
+        // 3. Dedicated Full-Screen Overlay Sheets (Mutually exclusive with Home Screen)
         AnimatedVisibility(
             visible = uiState.activeOverlay == ActiveOverlaySheet.APP_DRAWER,
-            enter = slideInVertically(
-                animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
-                initialOffsetY = { it / 2 }
-            ) + fadeIn(),
-            exit = slideOutVertically(targetOffsetY = { it / 2 }) + fadeOut()
+            enter = slideInVertically(initialOffsetY = { it / 4 }) + fadeIn(),
+            exit = slideOutVertically(targetOffsetY = { it / 4 }) + fadeOut()
         ) {
             AppDrawerSheet(
                 state = uiState,
@@ -216,11 +218,8 @@ fun PixelCategoryLauncherRoot(
 
         AnimatedVisibility(
             visible = uiState.activeOverlay == ActiveOverlaySheet.UNIFIED_SEARCH,
-            enter = slideInVertically(
-                animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
-                initialOffsetY = { it / 3 }
-            ) + fadeIn(),
-            exit = slideOutVertically(targetOffsetY = { it / 3 }) + fadeOut()
+            enter = slideInVertically(initialOffsetY = { it / 5 }) + fadeIn(),
+            exit = slideOutVertically(targetOffsetY = { it / 5 }) + fadeOut()
         ) {
             UnifiedSearchSheet(
                 launcherState = uiState,
@@ -229,7 +228,10 @@ fun PixelCategoryLauncherRoot(
                 onQueryChange = viewModel::updateUnifiedSearchQuery,
                 onLaunchApp = viewModel::launchApp,
                 onLongPressApp = { app -> viewModel.openAppContextMenu(app, null) },
-                onOpenFolder = viewModel::openFolder,
+                onOpenFolder = { folderId ->
+                    viewModel.closeOverlaysAndGoHome()
+                    viewModel.openFolder(folderId)
+                },
                 onOpenWebUrl = viewModel::openEmbeddedWebSearch,
                 onCloseWebView = viewModel::closeEmbeddedWebView,
                 onClearHistory = viewModel::clearSearchHistory,
@@ -265,8 +267,8 @@ fun PixelCategoryLauncherRoot(
 
         AnimatedVisibility(
             visible = uiState.activeOverlay == ActiveOverlaySheet.SETTINGS_CUSTOMIZATION,
-            enter = slideInVertically(initialOffsetY = { it / 3 }) + fadeIn(),
-            exit = slideOutVertically(targetOffsetY = { it / 3 }) + fadeOut()
+            enter = slideInVertically(initialOffsetY = { it / 4 }) + fadeIn(),
+            exit = slideOutVertically(targetOffsetY = { it / 4 }) + fadeOut()
         ) {
             SettingsAndCustomizationSheet(
                 state = uiState,
@@ -279,7 +281,34 @@ fun PixelCategoryLauncherRoot(
             )
         }
 
-        // 4. Floating Status Feedback Banner
+        // 4. Unified App Long-Press Context Dialog (Renders cleanly above whichever screen is active)
+        val contextApp = uiState.contextMenuApp
+        if (contextApp != null) {
+            AppLongPressContextDialog(
+                app = contextApp,
+                homeItem = uiState.contextMenuHomeItem,
+                categories = uiState.categories,
+                onDismiss = viewModel::dismissAppContextMenu,
+                onAssignPrimaryCategory = { catId ->
+                    viewModel.assignAppCategory(contextApp.packageName, catId, false)
+                },
+                onToggleAdditionalCategory = { catId, assigned ->
+                    viewModel.toggleAdditionalCategory(contextApp.packageName, catId, assigned)
+                },
+                onToggleFavorite = { viewModel.toggleAppFavorite(contextApp.packageName) },
+                onPinToHome = { toDock -> viewModel.pinAppToHome(contextApp.packageName, toDock) },
+                onStartGridMove = { item ->
+                    movingHomeItem = item
+                    viewModel.closeOverlaysAndGoHome()
+                },
+                onRemoveFromHome = { itemId -> viewModel.removeShortcutFromHome(itemId) },
+                onSaveCustomAppearance = { label, iconKey ->
+                    viewModel.setCustomAppIconOrLabel(contextApp.packageName, label, iconKey)
+                }
+            )
+        }
+
+        // 5. Floating Status Feedback Banner
         val bannerMessage = uiState.statusBannerMessage
         if (bannerMessage != null) {
             Box(
@@ -290,7 +319,7 @@ fun PixelCategoryLauncherRoot(
             ) {
                 FrostedGlassBox(
                     shape = RoundedCornerShape(22.dp),
-                    alphaOverride = 0.92f,
+                    alphaOverride = 0.94f,
                     modifier = Modifier
                         .fillMaxWidth()
                         .clickable { viewModel.showBanner(null) }

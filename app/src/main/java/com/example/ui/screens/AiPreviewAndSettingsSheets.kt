@@ -46,6 +46,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
@@ -90,17 +91,17 @@ fun AiLayoutPreviewSheet(
         state.installedApps.associateBy { it.packageName }
     }
 
-    FrostedGlassBox(
-        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
-        alphaOverride = 0.90f,
+    Surface(
+        color = MaterialTheme.colorScheme.background.copy(alpha = 0.97f),
+        contentColor = MaterialTheme.colorScheme.onBackground,
         modifier = modifier
             .fillMaxSize()
-            .windowInsetsPadding(WindowInsets.safeDrawing)
             .testTag("ai_organizer_preview_sheet")
     ) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
+                .windowInsetsPadding(WindowInsets.safeDrawing)
                 .windowInsetsPadding(WindowInsets.navigationBars)
                 .padding(16.dp)
                 .verticalScroll(rememberScrollState())
@@ -315,17 +316,17 @@ fun WidgetPickerSheet(
 ) {
     BackHandler(onBack = onClose)
 
-    FrostedGlassBox(
-        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
-        alphaOverride = 0.90f,
+    Surface(
+        color = MaterialTheme.colorScheme.background.copy(alpha = 0.97f),
+        contentColor = MaterialTheme.colorScheme.onBackground,
         modifier = modifier
             .fillMaxSize()
-            .windowInsetsPadding(WindowInsets.safeDrawing)
             .testTag("widget_picker_sheet")
     ) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
+                .windowInsetsPadding(WindowInsets.safeDrawing)
                 .windowInsetsPadding(WindowInsets.navigationBars)
                 .padding(16.dp)
                 .verticalScroll(rememberScrollState())
@@ -420,17 +421,17 @@ fun SettingsAndCustomizationSheet(
 
     val tabs = listOf("Home & Grid", "Drawer", "Theme & Glass", "Gestures", "Privacy & Backup")
 
-    FrostedGlassBox(
-        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
-        alphaOverride = 0.92f,
+    Surface(
+        color = MaterialTheme.colorScheme.background.copy(alpha = 0.97f),
+        contentColor = MaterialTheme.colorScheme.onBackground,
         modifier = modifier
             .fillMaxSize()
-            .windowInsetsPadding(WindowInsets.safeDrawing)
             .testTag("settings_customization_sheet")
     ) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
+                .windowInsetsPadding(WindowInsets.safeDrawing)
                 .windowInsetsPadding(WindowInsets.navigationBars)
         ) {
             // Header

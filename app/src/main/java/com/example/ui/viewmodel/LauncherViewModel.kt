@@ -30,14 +30,21 @@ import com.example.engine.SystemWidgetProviderItem
 import com.example.engine.UnifiedSearchEngine
 import com.example.engine.WidgetHostController
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 enum class ActiveOverlaySheet {
     NONE,
@@ -45,13 +52,13 @@ enum class ActiveOverlaySheet {
     UNIFIED_SEARCH,
     AI_ORGANIZER_PREVIEW,
     SETTINGS_CUSTOMIZATION,
-    CATEGORY_MANAGER,
-    WIDGET_PICKER,
-    BACKUP_RESTORE
+    WIDGET_PICKER
 }
 
 data class SearchUiState(
     val query: String = "",
+    val debouncedQuery: String = "",
+    val isSearching: Boolean = false,
     val appResults: List<AppInfo> = emptyList(),
     val folderResults: List<FolderModel> = emptyList(),
     val contactResults: List<ContactSearchResult> = emptyList(),
@@ -85,6 +92,7 @@ data class LauncherUiState(
     val backupJsonExportText: String = ""
 )
 
+@OptIn(FlowPreview::class)
 class LauncherViewModel(
     private val repository: LauncherRepository,
     private val discoveryEngine: AppDiscoveryEngine,
@@ -92,8 +100,14 @@ class LauncherViewModel(
     val widgetHostController: WidgetHostController
 ) : ViewModel() {
 
+    companion object {
+        const val SEARCH_DEBOUNCE_MS = 280L
+        const val DRAWER_SEARCH_DEBOUNCE_MS = 220L
+    }
+
     private val _selectedCategoryId = MutableStateFlow(DefaultCategory.ALL_APPS.id)
-    private val _drawerSearchQuery = MutableStateFlow("")
+    private val _rawDrawerSearchQuery = MutableStateFlow("")
+    private val _debouncedDrawerSearchQuery = MutableStateFlow("")
     private val _activeOverlay = MutableStateFlow(ActiveOverlaySheet.NONE)
     private val _openedFolderId = MutableStateFlow<Long?>(null)
     private val _contextMenuAppPkg = MutableStateFlow<String?>(null)
@@ -105,8 +119,11 @@ class LauncherViewModel(
     private val _statusBannerMessage = MutableStateFlow<String?>(null)
     private val _backupJsonExportText = MutableStateFlow("")
 
+    private val _rawUnifiedSearchQuery = MutableStateFlow("")
     private val _searchState = MutableStateFlow(SearchUiState())
     val searchState: StateFlow<SearchUiState> = _searchState.asStateFlow()
+
+    private var unifiedSearchJob: Job? = null
 
     val uiState: StateFlow<LauncherUiState> = combine(
         repository.installedAppsFlow,
@@ -117,7 +134,7 @@ class LauncherViewModel(
         repository.layoutSnapshotsFlow,
         repository.searchHistoryFlow,
         _selectedCategoryId,
-        _drawerSearchQuery,
+        _debouncedDrawerSearchQuery,
         _activeOverlay
     ) { values ->
         @Suppress("UNCHECKED_CAST")
@@ -191,13 +208,34 @@ class LauncherViewModel(
 
     init {
         widgetHostController.startListening()
+
+        // Observe debounced App Drawer search input
+        viewModelScope.launch {
+            _rawDrawerSearchQuery
+                .debounce { if (it.isBlank()) 0L else DRAWER_SEARCH_DEBOUNCE_MS }
+                .distinctUntilChanged()
+                .collectLatest { debounced ->
+                    _debouncedDrawerSearchQuery.value = debounced
+                }
+        }
+
+        // Keep initial default suggestions synced when installedApps finishes loading
+        viewModelScope.launch {
+            repository.installedAppsFlow.collectLatest { apps ->
+                if (_searchState.value.debouncedQuery.isBlank() && _searchState.value.appResults.isEmpty() && apps.isNotEmpty()) {
+                    executeUnifiedSearchFilter("")
+                }
+            }
+        }
+
         viewModelScope.launch {
             repository.initializeLauncherState()
             refreshDefaultHomeStatus()
             _iconPacks.value = repository.getAvailableIconPacks()
             _availableWidgets.value = widgetHostController.getAvailableWidgetProviders()
-            updateUnifiedSearchQuery("")
+            executeUnifiedSearchFilter("")
         }
+
         discoveryEngine.registerPackageChangeListener(
             onPackageAddedOrUpdated = { pkg ->
                 viewModelScope.launch {
@@ -223,17 +261,30 @@ class LauncherViewModel(
     }
 
     fun openOverlay(sheet: ActiveOverlaySheet) {
+        _openedFolderId.value = null
+        _contextMenuAppPkg.value = null
+        _contextMenuHomeItemId.value = null
         _activeOverlay.value = sheet
-        if (sheet == ActiveOverlaySheet.UNIFIED_SEARCH) {
-            updateUnifiedSearchQuery(_searchState.value.query)
-        } else if (sheet == ActiveOverlaySheet.SETTINGS_CUSTOMIZATION) {
-            viewModelScope.launch {
-                _iconPacks.value = repository.getAvailableIconPacks()
+
+        when (sheet) {
+            ActiveOverlaySheet.UNIFIED_SEARCH -> {
+                updateUnifiedSearchQuery(_searchState.value.query, immediate = true)
             }
-        } else if (sheet == ActiveOverlaySheet.WIDGET_PICKER) {
-            _availableWidgets.value = widgetHostController.getAvailableWidgetProviders()
-        } else if (sheet == ActiveOverlaySheet.AI_ORGANIZER_PREVIEW) {
-            generateLayoutPreview(ArrangementMode.AI_ORGANIZED)
+            ActiveOverlaySheet.APP_DRAWER -> {
+                updateDrawerSearchQuery("")
+            }
+            ActiveOverlaySheet.SETTINGS_CUSTOMIZATION -> {
+                viewModelScope.launch {
+                    _iconPacks.value = repository.getAvailableIconPacks()
+                }
+            }
+            ActiveOverlaySheet.WIDGET_PICKER -> {
+                _availableWidgets.value = widgetHostController.getAvailableWidgetProviders()
+            }
+            ActiveOverlaySheet.AI_ORGANIZER_PREVIEW -> {
+                generateLayoutPreview(ArrangementMode.AI_ORGANIZED)
+            }
+            ActiveOverlaySheet.NONE -> Unit
         }
     }
 
@@ -242,7 +293,8 @@ class LauncherViewModel(
         _openedFolderId.value = null
         _contextMenuAppPkg.value = null
         _contextMenuHomeItemId.value = null
-        _searchState.update { it.copy(activeWebViewUrl = null) }
+        updateDrawerSearchQuery("")
+        _searchState.update { it.copy(activeWebViewUrl = null, isSearching = false) }
     }
 
     fun selectDrawerCategory(categoryId: String) {
@@ -250,7 +302,10 @@ class LauncherViewModel(
     }
 
     fun updateDrawerSearchQuery(query: String) {
-        _drawerSearchQuery.value = query
+        _rawDrawerSearchQuery.value = query
+        if (query.isBlank()) {
+            _debouncedDrawerSearchQuery.value = ""
+        }
     }
 
     fun getFilteredAndSortedDrawerApps(state: LauncherUiState): List<AppInfo> {
@@ -300,18 +355,9 @@ class LauncherViewModel(
         }
     }
 
-    fun launchAppByPackage(packageName: String) {
-        val app = uiState.value.installedApps.firstOrNull { it.packageName == packageName }
-        if (app != null) {
-            launchApp(app)
-        } else {
-            viewModelScope.launch {
-                repository.launchAppAndRecordUsage(packageName, "")
-            }
-        }
-    }
-
     fun openFolder(folderId: Long) {
+        _contextMenuAppPkg.value = null
+        _contextMenuHomeItemId.value = null
         _openedFolderId.value = folderId
     }
 
@@ -320,6 +366,7 @@ class LauncherViewModel(
     }
 
     fun openAppContextMenu(app: AppInfo, homeItem: HomeScreenItemModel? = null) {
+        _openedFolderId.value = null
         _contextMenuAppPkg.value = app.packageName
         _contextMenuHomeItemId.value = homeItem?.id
     }
@@ -333,7 +380,7 @@ class LauncherViewModel(
         viewModelScope.launch {
             repository.assignAppToCategoryManually(packageName, categoryId, keepExisting)
             val catName = uiState.value.categories.firstOrNull { it.id == categoryId }?.name ?: "Category"
-            showBanner("Assigned to $catName (saved to offline AI memory)")
+            showBanner("Moved to $catName")
         }
     }
 
@@ -365,7 +412,7 @@ class LauncherViewModel(
     fun removeShortcutFromHome(itemId: Long) {
         viewModelScope.launch {
             repository.removeHomeItem(itemId)
-            showBanner("Removed from Home Screen (app remains installed)")
+            showBanner("Removed from Home Screen")
             dismissAppContextMenu()
         }
     }
@@ -415,7 +462,7 @@ class LauncherViewModel(
                 pageIndex = pageIndex
             )
             _activeOverlay.value = ActiveOverlaySheet.NONE
-            showBanner("Added widget '${provider.label}' to Home Screen")
+            showBanner("Added widget '${provider.label}'")
         }
     }
 
@@ -466,7 +513,7 @@ class LauncherViewModel(
             repository.applyProposedLayout(preview, saveUndoSnapshot = true)
             _proposedLayoutPreview.value = null
             _activeOverlay.value = ActiveOverlaySheet.NONE
-            showBanner("Applied ${preview.mode.displayName} layout (Undo available)")
+            showBanner("Applied ${preview.mode.displayName} layout")
         }
     }
 
@@ -481,35 +528,63 @@ class LauncherViewModel(
         }
     }
 
-    // --- Unified Search ---
+    // --- Debounced Unified Search ---
 
-    fun updateUnifiedSearchQuery(query: String) {
-        viewModelScope.launch(Dispatchers.IO) {
-            val state = uiState.value
-            val appsMap = state.installedApps.associateBy { it.packageName }
-            val matchedApps = searchEngine.searchApplications(query, state.installedApps)
-            val matchedFolders = searchEngine.searchFolders(query, state.folders, appsMap)
-            val hasContactsPerm = searchEngine.hasContactsPermission()
-            val matchedContacts = if (state.settings.enableContactsSearch && hasContactsPerm) {
-                searchEngine.searchContacts(query)
-            } else {
-                emptyList()
-            }
-            val matchedFiles = if (state.settings.enableFilesSearch) {
-                searchEngine.searchLocalFiles(query)
-            } else {
-                emptyList()
-            }
-            val online = searchEngine.isNetworkOnline()
-            val webSuggestions = if (state.settings.enableWebSuggestions) {
-                searchEngine.buildWebSearchSuggestions(query, state.settings.defaultSearchEngine)
-            } else {
-                emptyList()
-            }
+    /**
+     * Updates the search input text immediately on the main thread while debouncing
+     * result filtering by [SEARCH_DEBOUNCE_MS] so UI sections only update after the
+     * user pauses typing, eliminating layout jitter.
+     */
+    fun updateUnifiedSearchQuery(query: String, immediate: Boolean = false) {
+        _rawUnifiedSearchQuery.value = query
+        val shouldDebounce = !immediate && query.isNotBlank()
 
-            _searchState.update {
-                it.copy(
-                    query = query,
+        // 1. Update raw query immediately on main thread without mutating result lists mid-keystroke
+        _searchState.update {
+            it.copy(
+                query = query,
+                isSearching = shouldDebounce
+            )
+        }
+
+        // 2. Cancel any in-flight debounce timer or previous search computation
+        unifiedSearchJob?.cancel()
+        unifiedSearchJob = viewModelScope.launch {
+            if (shouldDebounce) {
+                delay(SEARCH_DEBOUNCE_MS)
+            }
+            executeUnifiedSearchFilter(query)
+        }
+    }
+
+    private suspend fun executeUnifiedSearchFilter(query: String) = withContext(Dispatchers.IO) {
+        val state = uiState.value
+        val appsMap = state.installedApps.associateBy { it.packageName }
+        val matchedApps = searchEngine.searchApplications(query, state.installedApps)
+        val matchedFolders = searchEngine.searchFolders(query, state.folders, appsMap)
+        val hasContactsPerm = searchEngine.hasContactsPermission()
+        val matchedContacts = if (state.settings.enableContactsSearch && hasContactsPerm && query.isNotBlank()) {
+            searchEngine.searchContacts(query)
+        } else {
+            emptyList()
+        }
+        val matchedFiles = if (state.settings.enableFilesSearch && query.length >= 2) {
+            searchEngine.searchLocalFiles(query)
+        } else {
+            emptyList()
+        }
+        val online = searchEngine.isNetworkOnline()
+        val webSuggestions = if (state.settings.enableWebSuggestions && query.isNotBlank()) {
+            searchEngine.buildWebSearchSuggestions(query, state.settings.defaultSearchEngine)
+        } else {
+            emptyList()
+        }
+
+        _searchState.update { current ->
+            if (current.query == query) {
+                current.copy(
+                    debouncedQuery = query,
+                    isSearching = false,
                     appResults = matchedApps,
                     folderResults = matchedFolders,
                     contactResults = matchedContacts,
@@ -518,6 +593,8 @@ class LauncherViewModel(
                     isOnline = online,
                     hasContactsPermission = hasContactsPerm
                 )
+            } else {
+                current
             }
         }
     }
@@ -554,7 +631,7 @@ class LauncherViewModel(
     fun clearSearchHistory() {
         viewModelScope.launch {
             repository.clearSearchHistory()
-            showBanner("Cleared local search history")
+            showBanner("Cleared search history")
         }
     }
 
@@ -585,7 +662,7 @@ class LauncherViewModel(
         viewModelScope.launch {
             val ok = repository.importLocalBackupJson(jsonText)
             if (ok) {
-                showBanner("Restored launcher layout, categories & settings from backup")
+                showBanner("Restored launcher layout & settings")
             } else {
                 showBanner("Invalid backup JSON format")
             }

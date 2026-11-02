@@ -55,13 +55,21 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -92,9 +100,28 @@ fun UnifiedSearchSheet(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val keyboardController = LocalSoftwareKeyboardController.current
+    val focusRequester = remember { FocusRequester() }
     val settings = launcherState.settings
     val iconShape = remember(settings.iconShape) {
         IconShapeOption.fromId(settings.iconShape)
+    }
+
+    // Immediate local text state so typing is 100% lag-free and never drops characters
+    var localQuery by remember { mutableStateOf(searchState.query) }
+    LaunchedEffect(searchState.query) {
+        if (localQuery != searchState.query) {
+            localQuery = searchState.query
+        }
+    }
+
+    // Automatically focus the search input field and open keyboard when Unified Search opens
+    LaunchedEffect(Unit) {
+        try {
+            focusRequester.requestFocus()
+            keyboardController?.show()
+        } catch (_: Exception) {
+        }
     }
 
     BackHandler {
@@ -108,7 +135,7 @@ fun UnifiedSearchSheet(
     val contactsPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
     ) { _ ->
-        onQueryChange(searchState.query)
+        onQueryChange(localQuery)
     }
 
     val safDocumentPicker = rememberLauncherForActivityResult(
@@ -126,25 +153,25 @@ fun UnifiedSearchSheet(
         }
     }
 
-    FrostedGlassBox(
-        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
-        alphaOverride = 0.88f,
+    Surface(
+        color = MaterialTheme.colorScheme.background.copy(alpha = 0.97f),
+        contentColor = MaterialTheme.colorScheme.onBackground,
         modifier = modifier
             .fillMaxSize()
-            .windowInsetsPadding(WindowInsets.safeDrawing)
             .testTag("unified_search_sheet")
     ) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
+                .windowInsetsPadding(WindowInsets.safeDrawing)
                 .windowInsetsPadding(WindowInsets.navigationBars)
-                .padding(top = 12.dp)
+                .padding(top = 10.dp)
         ) {
             // Top Unified Search Input Bar
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp),
+                    .padding(horizontal = 14.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
@@ -166,16 +193,37 @@ fun UnifiedSearchSheet(
                 }
 
                 OutlinedTextField(
-                    value = searchState.query,
-                    onValueChange = onQueryChange,
-                    placeholder = { Text(stringResource(R.string.search_hint)) },
+                    value = localQuery,
+                    onValueChange = { newText ->
+                        localQuery = newText
+                        onQueryChange(newText)
+                    },
+                    placeholder = {
+                        Text(
+                            text = stringResource(R.string.search_hint),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    },
                     leadingIcon = {
-                        Icon(Icons.Default.Search, contentDescription = null)
+                        Icon(
+                            imageVector = Icons.Default.Search,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary
+                        )
                     },
                     trailingIcon = {
-                        if (searchState.query.isNotEmpty()) {
-                            IconButton(onClick = { onQueryChange("") }) {
-                                Icon(Icons.Default.Clear, contentDescription = "Clear search")
+                        if (localQuery.isNotEmpty()) {
+                            IconButton(
+                                onClick = {
+                                    localQuery = ""
+                                    onQueryChange("")
+                                }
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Clear,
+                                    contentDescription = "Clear search",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
                             }
                         }
                     },
@@ -183,29 +231,58 @@ fun UnifiedSearchSheet(
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                     keyboardActions = KeyboardActions(
                         onSearch = {
-                            if (searchState.query.isNotBlank()) {
-                                onRecordHistory(searchState.query, "UNIFIED")
+                            if (localQuery.isNotBlank()) {
+                                keyboardController?.hide()
+                                onQueryChange(localQuery)
+                                onRecordHistory(localQuery, "UNIFIED")
                                 val topApp = searchState.appResults.firstOrNull()
                                 if (topApp != null) {
                                     onLaunchApp(topApp)
                                 } else if (searchState.isOnline) {
-                                    onOpenWebUrl(searchState.query)
+                                    onOpenWebUrl(localQuery)
                                 }
                             }
                         }
                     ),
                     shape = RoundedCornerShape(26.dp),
                     colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                        unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
+                        cursorColor = MaterialTheme.colorScheme.primary,
+                        focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.60f),
+                        unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.42f),
                         focusedBorderColor = MaterialTheme.colorScheme.primary,
-                        unfocusedBorderColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.25f)
+                        unfocusedBorderColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.20f)
                     ),
                     modifier = Modifier
                         .weight(1f)
+                        .focusRequester(focusRequester)
                         .testTag("unified_search_input")
                 )
             }
 
-            Spacer(modifier = Modifier.height(10.dp))
+            // Fixed-height 6.dp slot so the debounce indicator never shifts the list vertically
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(10.dp)
+                    .padding(horizontal = 24.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                if (searchState.isSearching) {
+                    androidx.compose.material3.LinearProgressIndicator(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(2.dp)
+                            .testTag("search_debounce_indicator"),
+                        color = MaterialTheme.colorScheme.primary,
+                        trackColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+                    )
+                }
+            }
+
+            // Use the settled debouncedQuery to drive section headers and visibility so UI never jitters mid-keystroke
+            val settledQuery = searchState.debouncedQuery
 
             // Embedded Secure WebView Mode (when user taps a Web result)
             val activeUrl = searchState.activeWebViewUrl
@@ -229,22 +306,22 @@ fun UnifiedSearchSheet(
             } else {
                 LazyColumn(
                     contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-                    verticalArrangement = Arrangement.spacedBy(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxWidth()
                         .testTag("unified_search_results_list")
                 ) {
-                    // Section F: Recent Search History (when query is blank or matching)
-                    if (launcherState.searchHistory.isNotEmpty() && searchState.query.isBlank()) {
-                        item {
+                    // Section F: Recent Search History (when settled query is blank)
+                    if (launcherState.searchHistory.isNotEmpty() && settledQuery.isBlank()) {
+                        item(key = "section_recent_history") {
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Text(
-                                    text = "Recent Searches (Offline History)",
+                                    text = "Recent Searches",
                                     style = MaterialTheme.typography.titleMedium,
                                     color = MaterialTheme.colorScheme.primary
                                 )
@@ -257,7 +334,10 @@ fun UnifiedSearchSheet(
                                     FrostedGlassBox(
                                         shape = RoundedCornerShape(16.dp),
                                         alphaOverride = 0.6f,
-                                        modifier = Modifier.clickable { onQueryChange(entry.query) }
+                                        modifier = Modifier.clickable {
+                                            localQuery = entry.query
+                                            onQueryChange(entry.query)
+                                        }
                                     ) {
                                         Row(
                                             modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
@@ -283,17 +363,17 @@ fun UnifiedSearchSheet(
                     }
 
                     // Section A: Applications
-                    item {
+                    item(key = "section_apps") {
                         Text(
-                            text = if (searchState.query.isBlank()) {
-                                "Suggested Applications"
+                            text = if (settledQuery.isBlank()) {
+                                "Suggested Apps"
                             } else {
-                                "Applications (${searchState.appResults.size})"
+                                "Apps (${searchState.appResults.size})"
                             },
                             style = MaterialTheme.typography.titleMedium,
                             color = MaterialTheme.colorScheme.primary
                         )
-                        Spacer(modifier = Modifier.height(6.dp))
+                        Spacer(modifier = Modifier.height(8.dp))
                         if (searchState.appResults.isEmpty()) {
                             Text(
                                 text = "No matching installed applications",
@@ -301,7 +381,7 @@ fun UnifiedSearchSheet(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         } else {
-                            LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                                 items(searchState.appResults, key = { it.packageName }) { app ->
                                     LauncherAppTile(
                                         app = app,
@@ -309,10 +389,11 @@ fun UnifiedSearchSheet(
                                         iconScale = settings.iconScale,
                                         iconShape = iconShape,
                                         showLabel = true,
-                                        showCategoryBadge = true,
+                                        showCategoryBadge = false,
+                                        labelColor = MaterialTheme.colorScheme.onSurface,
                                         onClick = {
-                                            if (searchState.query.isNotBlank()) {
-                                                onRecordHistory(searchState.query, "APP")
+                                            if (settledQuery.isNotBlank()) {
+                                                onRecordHistory(settledQuery, "APP")
                                             }
                                             onLaunchApp(app)
                                         },
@@ -372,8 +453,8 @@ fun UnifiedSearchSheet(
                     }
 
                     // Section C: Contacts
-                    if (settings.enableContactsSearch) {
-                        item {
+                    if (settings.enableContactsSearch && (settledQuery.isNotBlank() || !searchState.hasContactsPermission)) {
+                        item(key = "section_contacts_header") {
                             Text(
                                 text = "Contacts",
                                 style = MaterialTheme.typography.titleMedium,
@@ -381,7 +462,7 @@ fun UnifiedSearchSheet(
                             )
                         }
                         if (!searchState.hasContactsPermission) {
-                            item {
+                            item(key = "section_contacts_permission") {
                                 FrostedGlassBox(
                                     shape = RoundedCornerShape(16.dp),
                                     alphaOverride = 0.62f,
@@ -503,7 +584,7 @@ fun UnifiedSearchSheet(
 
                     // Section D: Files (MediaStore + SAF Document Picker)
                     if (settings.enableFilesSearch) {
-                        item {
+                        item(key = "section_files_header") {
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -576,8 +657,8 @@ fun UnifiedSearchSheet(
                     }
 
                     // Section E: Web Search & Offline State Awareness
-                    if (searchState.query.isNotBlank()) {
-                        item {
+                    if (settledQuery.isNotBlank()) {
+                        item(key = "section_web_header") {
                             Text(
                                 text = "Web Search (${settings.defaultSearchEngine})",
                                 style = MaterialTheme.typography.titleMedium,
@@ -608,7 +689,7 @@ fun UnifiedSearchSheet(
                                                 fontWeight = FontWeight.SemiBold
                                             )
                                             Text(
-                                                text = "Internet connectivity is unavailable for Web Search. App, Folder, Contact, File search, and AI categorization remain 100% functional offline.",
+                                                text = "Web search requires internet. Local App, Folder, Contact, File search, and AI categorization remain active.",
                                                 style = MaterialTheme.typography.bodyMedium,
                                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                                             )
@@ -623,7 +704,10 @@ fun UnifiedSearchSheet(
                                     alphaOverride = 0.6f,
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .clickable { onOpenWebUrl(suggestion.url) }
+                                        .clickable {
+                                            keyboardController?.hide()
+                                            onOpenWebUrl(suggestion.url)
+                                        }
                                         .testTag("web_suggestion_${suggestion.query}")
                                 ) {
                                     Row(
@@ -733,7 +817,6 @@ private fun EmbeddedSecureSearchWebView(
             AndroidView(
                 factory = { ctx ->
                     WebView(ctx).apply {
-                        // Strict security hardening: no file access, no content access, no JS bridges
                         settings.apply {
                             javaScriptEnabled = true
                             domStorageEnabled = true
