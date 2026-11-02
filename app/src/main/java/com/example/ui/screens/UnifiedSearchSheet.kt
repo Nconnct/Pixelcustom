@@ -11,7 +11,10 @@ import android.webkit.WebViewClient
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -23,6 +26,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
@@ -31,58 +35,80 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Message
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.OpenInBrowser
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Public
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.example.R
 import com.example.domain.model.AppInfo
 import com.example.domain.model.IconShapeOption
 import com.example.ui.components.FrostedGlassBox
+import com.example.ui.components.FrostedGlassPageSurface
 import com.example.ui.components.LauncherAppTile
+import com.example.ui.theme.LocalLauncherTokens
 import com.example.ui.viewmodel.LauncherUiState
 import com.example.ui.viewmodel.SearchUiState
+import kotlin.math.roundToInt
+
+private const val SEARCH_DISMISS_DRAG_THRESHOLD_PX = 95f
+private const val SEARCH_DISMISS_FLING_VELOCITY = 520f
 
 @Composable
 fun UnifiedSearchSheet(
@@ -115,6 +141,21 @@ fun UnifiedSearchSheet(
         }
     }
 
+    // Always clear the search text when exiting the search sheet so old text never lingers
+    val closeSearchAndClear = {
+        localQuery = ""
+        onQueryChange("")
+        keyboardController?.hide()
+        onCloseSearch()
+    }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            localQuery = ""
+            onQueryChange("")
+        }
+    }
+
     // Automatically focus the search input field and open keyboard when Unified Search opens
     LaunchedEffect(Unit) {
         try {
@@ -128,7 +169,58 @@ fun UnifiedSearchSheet(
         if (searchState.activeWebViewUrl != null) {
             onCloseWebView()
         } else {
-            onCloseSearch()
+            closeSearchAndClear()
+        }
+    }
+
+    val listState = rememberLazyListState()
+    var dragOffsetY by remember { mutableFloatStateOf(0f) }
+    val animatedDragOffsetY by animateFloatAsState(
+        targetValue = dragOffsetY,
+        label = "search_swipe_down_offset"
+    )
+
+    val searchNestedScrollConnection = remember(listState, searchState.activeWebViewUrl) {
+        object : NestedScrollConnection {
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                if (searchState.activeWebViewUrl != null) return Offset.Zero
+                if (dragOffsetY > 0f && available.y < 0f) {
+                    val consumedY = available.y.coerceAtLeast(-dragOffsetY)
+                    dragOffsetY = (dragOffsetY + consumedY).coerceAtLeast(0f)
+                    return Offset(0f, consumedY)
+                }
+                return Offset.Zero
+            }
+
+            override fun onPostScroll(
+                consumed: Offset,
+                available: Offset,
+                source: NestedScrollSource
+            ): Offset {
+                if (searchState.activeWebViewUrl != null) return Offset.Zero
+                if (available.y > 0f) {
+                    val atTop = listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset == 0
+                    if (atTop || consumed.y == 0f) {
+                        dragOffsetY = (dragOffsetY + available.y * 0.85f).coerceAtLeast(0f)
+                        return Offset(0f, available.y)
+                    }
+                }
+                return Offset.Zero
+            }
+
+            override suspend fun onPreFling(available: Velocity): Velocity {
+                if (searchState.activeWebViewUrl != null) return Velocity.Zero
+                val atTop = listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset == 0
+                if (dragOffsetY >= SEARCH_DISMISS_DRAG_THRESHOLD_PX ||
+                    (atTop && available.y >= SEARCH_DISMISS_FLING_VELOCITY)
+                ) {
+                    dragOffsetY = 0f
+                    closeSearchAndClear()
+                    return available
+                }
+                dragOffsetY = 0f
+                return Velocity.Zero
+            }
         }
     }
 
@@ -153,11 +245,12 @@ fun UnifiedSearchSheet(
         }
     }
 
-    Surface(
-        color = MaterialTheme.colorScheme.background.copy(alpha = 0.97f),
-        contentColor = MaterialTheme.colorScheme.onBackground,
+    FrostedGlassPageSurface(
+        alphaMultiplier = if (searchState.activeWebViewUrl != null) 0.56f else 0.68f,
         modifier = modifier
             .fillMaxSize()
+            .offset { IntOffset(0, animatedDragOffsetY.roundToInt().coerceAtLeast(0)) }
+            .nestedScroll(searchNestedScrollConnection)
             .testTag("unified_search_sheet")
     ) {
         Column(
@@ -165,103 +258,157 @@ fun UnifiedSearchSheet(
                 .fillMaxSize()
                 .windowInsetsPadding(WindowInsets.safeDrawing)
                 .windowInsetsPadding(WindowInsets.navigationBars)
-                .padding(top = 10.dp)
+                .padding(top = 6.dp)
         ) {
-            // Top Unified Search Input Bar
-            Row(
+            // Top Swipe-Down Handle & Unified Search Input Bar
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 14.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    .pointerInput(searchState.activeWebViewUrl) {
+                        var headerDragDy = 0f
+                        detectVerticalDragGestures(
+                            onDragStart = { headerDragDy = 0f },
+                            onVerticalDrag = { change, dragAmount ->
+                                change.consume()
+                                headerDragDy += dragAmount
+                                dragOffsetY = (dragOffsetY + dragAmount).coerceAtLeast(0f)
+                            },
+                            onDragCancel = { dragOffsetY = 0f },
+                            onDragEnd = {
+                                if (headerDragDy >= SEARCH_DISMISS_DRAG_THRESHOLD_PX ||
+                                    dragOffsetY >= SEARCH_DISMISS_DRAG_THRESHOLD_PX
+                                ) {
+                                    dragOffsetY = 0f
+                                    closeSearchAndClear()
+                                } else {
+                                    dragOffsetY = 0f
+                                }
+                            }
+                        )
+                    }
             ) {
-                IconButton(
-                    onClick = {
-                        if (searchState.activeWebViewUrl != null) {
-                            onCloseWebView()
-                        } else {
-                            onCloseSearch()
-                        }
-                    },
-                    modifier = Modifier.testTag("unified_search_back_button")
+                Row(
+                    modifier = Modifier
+                        .align(Alignment.CenterHorizontally)
+                        .clip(RoundedCornerShape(16.dp))
+                        .clickable(onClick = closeSearchAndClear)
+                        .padding(horizontal = 24.dp, vertical = 3.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
+                    Box(
+                        modifier = Modifier
+                            .size(width = 40.dp, height = 4.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.50f))
+                    )
                     Icon(
-                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = "Back",
-                        tint = MaterialTheme.colorScheme.onSurface
+                        imageVector = Icons.Default.KeyboardArrowDown,
+                        contentDescription = "Close Search",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.68f),
+                        modifier = Modifier.size(15.dp)
                     )
                 }
 
-                OutlinedTextField(
-                    value = localQuery,
-                    onValueChange = { newText ->
-                        localQuery = newText
-                        onQueryChange(newText)
-                    },
-                    placeholder = {
-                        Text(
-                            text = stringResource(R.string.search_hint),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    },
-                    leadingIcon = {
-                        Icon(
-                            imageVector = Icons.Default.Search,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary
-                        )
-                    },
-                    trailingIcon = {
-                        if (localQuery.isNotEmpty()) {
-                            IconButton(
-                                onClick = {
-                                    localQuery = ""
-                                    onQueryChange("")
-                                }
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Clear,
-                                    contentDescription = "Clear search",
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                        }
-                    },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                    keyboardActions = KeyboardActions(
-                        onSearch = {
-                            if (localQuery.isNotBlank()) {
-                                keyboardController?.hide()
-                                onQueryChange(localQuery)
-                                onRecordHistory(localQuery, "UNIFIED")
-                                val topApp = searchState.appResults.firstOrNull()
-                                if (topApp != null) {
-                                    onLaunchApp(topApp)
-                                } else if (searchState.isOnline) {
-                                    onOpenWebUrl(localQuery)
-                                }
-                            }
-                        }
-                    ),
-                    shape = RoundedCornerShape(26.dp),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = MaterialTheme.colorScheme.onSurface,
-                        unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
-                        cursorColor = MaterialTheme.colorScheme.primary,
-                        focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.60f),
-                        unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.42f),
-                        focusedBorderColor = MaterialTheme.colorScheme.primary,
-                        unfocusedBorderColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.20f)
-                    ),
+                Spacer(modifier = Modifier.height(4.dp))
+
+                Row(
                     modifier = Modifier
-                        .weight(1f)
-                        .focusRequester(focusRequester)
-                        .testTag("unified_search_input")
-                )
+                        .fillMaxWidth()
+                        .padding(horizontal = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    IconButton(
+                        onClick = {
+                            if (searchState.activeWebViewUrl != null) {
+                                onCloseWebView()
+                            } else {
+                                closeSearchAndClear()
+                            }
+                        },
+                        modifier = Modifier.testTag("unified_search_back_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "Back",
+                            tint = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+
+                    OutlinedTextField(
+                        value = localQuery,
+                        onValueChange = { newText ->
+                            localQuery = newText
+                            onQueryChange(newText)
+                        },
+                        placeholder = {
+                            Text(
+                                text = stringResource(R.string.search_hint),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        },
+                        leadingIcon = {
+                            Icon(
+                                imageVector = Icons.Default.Search,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        },
+                        trailingIcon = {
+                            if (localQuery.isNotEmpty()) {
+                                IconButton(
+                                    onClick = {
+                                        localQuery = ""
+                                        onQueryChange("")
+                                    }
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Clear,
+                                        contentDescription = "Clear search",
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                        keyboardActions = KeyboardActions(
+                            onSearch = {
+                                if (localQuery.isNotBlank()) {
+                                    val submittedQuery = localQuery
+                                    keyboardController?.hide()
+                                    onRecordHistory(submittedQuery, "UNIFIED")
+                                    val topApp = searchState.appResults.firstOrNull()
+                                    if (topApp != null && searchState.activeWebViewUrl == null) {
+                                        localQuery = ""
+                                        onQueryChange("")
+                                        onLaunchApp(topApp)
+                                    } else if (searchState.isOnline) {
+                                        onOpenWebUrl(submittedQuery)
+                                    }
+                                }
+                            }
+                        ),
+                        shape = RoundedCornerShape(26.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                            unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
+                            cursorColor = MaterialTheme.colorScheme.primary,
+                            focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.52f),
+                            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.36f),
+                            focusedBorderColor = MaterialTheme.colorScheme.primary,
+                            unfocusedBorderColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.20f)
+                        ),
+                        modifier = Modifier
+                            .weight(1f)
+                            .focusRequester(focusRequester)
+                            .testTag("unified_search_input")
+                    )
+                }
             }
 
-            // Fixed-height 6.dp slot so the debounce indicator never shifts the list vertically
+            // Fixed-height 10.dp slot so the debounce indicator never shifts the list vertically
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -284,13 +431,14 @@ fun UnifiedSearchSheet(
             // Use the settled debouncedQuery to drive section headers and visibility so UI never jitters mid-keystroke
             val settledQuery = searchState.debouncedQuery
 
-            // Embedded Secure WebView Mode (when user taps a Web result)
+            // Embedded Frosted-Glass WebView Mode (when user searches or browses the internet from the launcher)
             val activeUrl = searchState.activeWebViewUrl
             if (activeUrl != null) {
                 EmbeddedSecureSearchWebView(
                     url = activeUrl,
                     isOnline = searchState.isOnline,
                     onClose = onCloseWebView,
+                    onExitSearchCompletely = closeSearchAndClear,
                     onOpenExternal = {
                         try {
                             context.startActivity(
@@ -305,6 +453,7 @@ fun UnifiedSearchSheet(
                 )
             } else {
                 LazyColumn(
+                    state = listState,
                     contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp),
                     modifier = Modifier
@@ -395,6 +544,8 @@ fun UnifiedSearchSheet(
                                             if (settledQuery.isNotBlank()) {
                                                 onRecordHistory(settledQuery, "APP")
                                             }
+                                            localQuery = ""
+                                            onQueryChange("")
                                             onLaunchApp(app)
                                         },
                                         onLongClick = { onLongPressApp(app) }
@@ -416,11 +567,11 @@ fun UnifiedSearchSheet(
                         items(searchState.folderResults, key = { "folder_${it.id}" }) { folder ->
                             FrostedGlassBox(
                                 shape = RoundedCornerShape(16.dp),
-                                alphaOverride = 0.6f,
+                                alphaOverride = 0.56f,
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .clickable {
-                                        onCloseSearch()
+                                        closeSearchAndClear()
                                         onOpenFolder(folder.id)
                                     }
                             ) {
@@ -465,7 +616,7 @@ fun UnifiedSearchSheet(
                             item(key = "section_contacts_permission") {
                                 FrostedGlassBox(
                                     shape = RoundedCornerShape(16.dp),
-                                    alphaOverride = 0.62f,
+                                    alphaOverride = 0.58f,
                                     modifier = Modifier.fillMaxWidth()
                                 ) {
                                     Row(
@@ -504,7 +655,7 @@ fun UnifiedSearchSheet(
                             ) { contact ->
                                 FrostedGlassBox(
                                     shape = RoundedCornerShape(16.dp),
-                                    alphaOverride = 0.62f,
+                                    alphaOverride = 0.58f,
                                     modifier = Modifier.fillMaxWidth()
                                 ) {
                                     Row(
@@ -612,7 +763,7 @@ fun UnifiedSearchSheet(
                         items(searchState.fileResults, key = { "file_${it.id}" }) { file ->
                             FrostedGlassBox(
                                 shape = RoundedCornerShape(14.dp),
-                                alphaOverride = 0.6f,
+                                alphaOverride = 0.56f,
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .clickable {
@@ -669,7 +820,7 @@ fun UnifiedSearchSheet(
                             item {
                                 FrostedGlassBox(
                                     shape = RoundedCornerShape(16.dp),
-                                    alphaOverride = 0.68f,
+                                    alphaOverride = 0.62f,
                                     modifier = Modifier.fillMaxWidth()
                                 ) {
                                     Row(
@@ -701,7 +852,7 @@ fun UnifiedSearchSheet(
                             items(searchState.webSuggestions, key = { it.url }) { suggestion ->
                                 FrostedGlassBox(
                                     shape = RoundedCornerShape(14.dp),
-                                    alphaOverride = 0.6f,
+                                    alphaOverride = 0.56f,
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .clickable {
@@ -755,95 +906,237 @@ private fun EmbeddedSecureSearchWebView(
     url: String,
     isOnline: Boolean,
     onClose: () -> Unit,
+    onExitSearchCompletely: () -> Unit,
     onOpenExternal: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    Column(modifier = modifier.fillMaxSize()) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 6.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = url.take(46),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.weight(1f)
-            )
-            Row {
-                TextButton(onClick = onOpenExternal) {
-                    Text("Open in Browser")
-                }
-                TextButton(onClick = onClose) {
-                    Text("Close Web")
-                }
-            }
-        }
+    val tokens = LocalLauncherTokens.current
+    var isGlassWebMode by remember { mutableStateOf(true) }
+    var webViewRef by remember { mutableStateOf<WebView?>(null) }
 
-        if (!isOnline) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(24.dp),
-                contentAlignment = Alignment.Center
+    val applyFrostedWebCss: (WebView, Boolean) -> Unit = { view, glassEnabled ->
+        val isDark = tokens.isDarkTheme
+        val js = if (glassEnabled) {
+            val bgRgba = if (isDark) "rgba(15, 23, 42, 0.34)" else "rgba(248, 250, 252, 0.42)"
+            val cardRgba = if (isDark) "rgba(30, 41, 59, 0.54)" else "rgba(255, 255, 255, 0.60)"
+            val textHex = if (isDark) "#F8FAFC" else "#0F172A"
+            """
+            (function() {
+                var style = document.getElementById('pixel-frosted-glass-style');
+                if (!style) {
+                    style = document.createElement('style');
+                    style.id = 'pixel-frosted-glass-style';
+                    document.head.appendChild(style);
+                }
+                style.innerHTML = 'html, body, #main, #cnt, #rcnt, .L3eUgb, .sfbg, #appbar { background: ' + '$bgRgba' + ' !important; background-color: ' + '$bgRgba' + ' !important; color: ' + '$textHex' + ' !important; } ' +
+                    'div.g, .MjjYud > div, .result, .b_algo, article, section { background: ' + '$cardRgba' + ' !important; border-radius: 16px !important; backdrop-filter: blur(10px) !important; margin-bottom: 8px !important; padding: 8px !important; }';
+            })();
+            """.trimIndent()
+        } else {
+            """
+            (function() {
+                var style = document.getElementById('pixel-frosted-glass-style');
+                if (style) { style.remove(); }
+            })();
+            """.trimIndent()
+        }
+        try {
+            view.evaluateJavascript(js, null)
+        } catch (_: Exception) {
+        }
+    }
+
+    FrostedGlassBox(
+        shape = RoundedCornerShape(24.dp),
+        alphaOverride = if (isGlassWebMode) 0.38f else 0.82f,
+        modifier = modifier
+            .fillMaxSize()
+            .padding(horizontal = 10.dp, vertical = 4.dp)
+            .testTag("frosted_internet_browser_container")
+    ) {
+        Column(modifier = Modifier.fillMaxSize()) {
+            // Frosted Glass Internet Browser Toolbar
+            FrostedGlassBox(
+                shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp, bottomStart = 12.dp, bottomEnd = 12.dp),
+                alphaOverride = 0.62f,
+                modifier = Modifier.fillMaxWidth()
             ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(
-                        imageVector = Icons.Default.CloudOff,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.tertiary,
-                        modifier = Modifier.size(48.dp)
-                    )
-                    Spacer(Modifier.height(12.dp))
-                    Text(
-                        text = "No Internet Connection",
-                        style = MaterialTheme.typography.titleLarge
-                    )
-                    Spacer(Modifier.height(6.dp))
-                    Text(
-                        text = "Web results require an active internet connection.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Spacer(Modifier.height(16.dp))
-                    Button(onClick = onClose) {
-                        Text("Return to Local Search")
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Public,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Text(
+                            text = url.removePrefix("https://").removePrefix("http://").take(34),
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            maxLines = 1
+                        )
+                    }
+
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
+                        FilterChip(
+                            selected = isGlassWebMode,
+                            onClick = {
+                                isGlassWebMode = !isGlassWebMode
+                                webViewRef?.let { applyFrostedWebCss(it, isGlassWebMode) }
+                            },
+                            label = {
+                                Text(
+                                    text = if (isGlassWebMode) "Glass UI" else "Solid UI",
+                                    style = MaterialTheme.typography.labelSmall
+                                )
+                            },
+                            leadingIcon = {
+                                Icon(
+                                    imageVector = Icons.Default.AutoAwesome,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                            },
+                            modifier = Modifier.testTag("toggle_glass_web_mode_chip")
+                        )
+
+                        IconButton(
+                            onClick = { webViewRef?.reload() },
+                            modifier = Modifier.size(34.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Refresh,
+                                contentDescription = "Reload Page",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+
+                        IconButton(
+                            onClick = onOpenExternal,
+                            modifier = Modifier.size(34.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.OpenInBrowser,
+                                contentDescription = "Open in External Browser",
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+
+                        IconButton(
+                            onClick = {
+                                onClose()
+                                onExitSearchCompletely()
+                            },
+                            modifier = Modifier
+                                .size(34.dp)
+                                .testTag("close_web_browser_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Close Internet View",
+                                tint = MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
                     }
                 }
             }
-        } else {
-            AndroidView(
-                factory = { ctx ->
-                    WebView(ctx).apply {
-                        settings.apply {
-                            javaScriptEnabled = true
-                            domStorageEnabled = true
-                            allowFileAccess = false
-                            allowContentAccess = false
-                            mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
+
+            if (!isOnline) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(24.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(
+                            imageVector = Icons.Default.CloudOff,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.tertiary,
+                            modifier = Modifier.size(48.dp)
+                        )
+                        Spacer(Modifier.height(12.dp))
+                        Text(
+                            text = "No Internet Connection",
+                            style = MaterialTheme.typography.titleLarge
+                        )
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            text = "Web results require an active internet connection.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(Modifier.height(16.dp))
+                        Button(onClick = onClose) {
+                            Text("Return to Local Search")
                         }
-                        webViewClient = object : WebViewClient() {
-                            override fun shouldOverrideUrlLoading(
-                                view: WebView?,
-                                request: WebResourceRequest?
-                            ): Boolean {
-                                val targetUri = request?.url ?: return true
-                                val scheme = targetUri.scheme?.lowercase()
-                                return scheme != "https" && scheme != "http"
+                    }
+                }
+            } else {
+                AndroidView(
+                    factory = { ctx ->
+                        WebView(ctx).apply {
+                            setBackgroundColor(android.graphics.Color.TRANSPARENT)
+                            settings.apply {
+                                javaScriptEnabled = true
+                                domStorageEnabled = true
+                                allowFileAccess = false
+                                allowContentAccess = false
+                                mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
                             }
+                            webViewClient = object : WebViewClient() {
+                                override fun shouldOverrideUrlLoading(
+                                    view: WebView?,
+                                    request: WebResourceRequest?
+                                ): Boolean {
+                                    val targetUri = request?.url ?: return true
+                                    val scheme = targetUri.scheme?.lowercase()
+                                    return scheme != "https" && scheme != "http"
+                                }
+
+                                override fun onPageFinished(view: WebView?, loadedUrl: String?) {
+                                    super.onPageFinished(view, loadedUrl)
+                                    if (view != null) {
+                                        view.setBackgroundColor(android.graphics.Color.TRANSPARENT)
+                                        applyFrostedWebCss(view, isGlassWebMode)
+                                    }
+                                }
+                            }
+                            webViewRef = this
+                            loadUrl(url)
                         }
-                        loadUrl(url)
-                    }
-                },
-                update = { webView ->
-                    if (webView.url != url) {
-                        webView.loadUrl(url)
-                    }
-                },
-                modifier = Modifier.fillMaxSize()
-            )
+                    },
+                    update = { webView ->
+                        webViewRef = webView
+                        webView.setBackgroundColor(android.graphics.Color.TRANSPARENT)
+                        if (webView.url != url) {
+                            webView.loadUrl(url)
+                        } else {
+                            applyFrostedWebCss(webView, isGlassWebMode)
+                        }
+                    },
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clip(RoundedCornerShape(bottomStart = 24.dp, bottomEnd = 24.dp))
+                )
+            }
         }
     }
 }
+

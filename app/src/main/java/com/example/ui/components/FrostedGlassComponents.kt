@@ -126,7 +126,7 @@ fun FrostedGlassBox(
     content: @Composable () -> Unit
 ) {
     val tokens = LocalLauncherTokens.current
-    val surfaceAlpha = (alphaOverride ?: tokens.frostedSurfaceAlpha).coerceIn(0.25f, 0.98f)
+    val surfaceAlpha = (alphaOverride ?: tokens.frostedSurfaceAlpha).coerceIn(0.12f, 0.96f)
     val baseColor = tintOverride ?: tokens.surfaceColor
     val borderColor = if (tokens.isDarkTheme) FrostedBorderDark else FrostedBorderLight
 
@@ -136,12 +136,51 @@ fun FrostedGlassBox(
             .background(
                 brush = Brush.verticalGradient(
                     colors = listOf(
-                        baseColor.copy(alpha = (surfaceAlpha + 0.05f).coerceAtMost(0.98f)),
+                        baseColor.copy(alpha = (surfaceAlpha + 0.05f).coerceAtMost(0.96f)),
                         baseColor.copy(alpha = surfaceAlpha)
                     )
                 )
             )
             .border(width = 1.dp, color = borderColor, shape = shape)
+    ) {
+        content()
+    }
+}
+
+/**
+ * Full-screen translucent Frosted Glass Page surface used by App Drawer, Unified Search,
+ * In-Launcher Internet Browser, and Customization sheets so the blurred Pixel wallpaper
+ * shines through with a refined frosted glass aesthetic.
+ */
+@Composable
+fun FrostedGlassPageSurface(
+    modifier: Modifier = Modifier,
+    alphaMultiplier: Float = 0.72f,
+    content: @Composable () -> Unit
+) {
+    val tokens = LocalLauncherTokens.current
+    val effectiveAlpha = (tokens.frostedSurfaceAlpha * alphaMultiplier).coerceIn(0.42f, 0.78f)
+    val baseColor = tokens.surfaceColor
+    val topSheen = if (tokens.isDarkTheme) {
+        Color(0xFF1E293B).copy(alpha = effectiveAlpha)
+    } else {
+        Color(0xFFF8FAFC).copy(alpha = effectiveAlpha)
+    }
+
+    Surface(
+        color = Color.Transparent,
+        contentColor = MaterialTheme.colorScheme.onBackground,
+        modifier = modifier
+            .fillMaxSize()
+            .background(
+                brush = Brush.verticalGradient(
+                    colors = listOf(
+                        topSheen,
+                        baseColor.copy(alpha = (effectiveAlpha + 0.06f).coerceAtMost(0.82f)),
+                        baseColor.copy(alpha = (effectiveAlpha + 0.10f).coerceAtMost(0.85f))
+                    )
+                )
+            )
     ) {
         content()
     }

@@ -1,8 +1,10 @@
 package com.example.ui.screens
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -14,6 +16,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
@@ -23,6 +26,7 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -42,6 +46,7 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
@@ -54,22 +59,30 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
 import com.example.domain.model.AppInfo
 import com.example.domain.model.CategoryModel
@@ -77,8 +90,13 @@ import com.example.domain.model.DefaultCategory
 import com.example.domain.model.DrawerSortMode
 import com.example.domain.model.IconShapeOption
 import com.example.ui.components.FrostedGlassBox
+import com.example.ui.components.FrostedGlassPageSurface
 import com.example.ui.components.LauncherAppTile
 import com.example.ui.viewmodel.LauncherUiState
+import kotlin.math.roundToInt
+
+private const val DRAWER_DISMISS_DRAG_THRESHOLD_PX = 95f
+private const val DRAWER_DISMISS_FLING_VELOCITY = 520f
 
 @Composable
 fun AppDrawerSheet(
@@ -97,8 +115,6 @@ fun AppDrawerSheet(
     onDeleteCategory: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    BackHandler(onBack = onCloseDrawer)
-
     val focusManager = LocalFocusManager.current
     val settings = state.settings
     val iconShape = remember(settings.iconShape) {
@@ -116,6 +132,85 @@ fun AppDrawerSheet(
         }
     }
 
+    val closeAndClearSearch = {
+        localSearchText = ""
+        onUpdateSearchQuery("")
+        focusManager.clearFocus()
+        onCloseDrawer()
+    }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            localSearchText = ""
+            onUpdateSearchQuery("")
+        }
+    }
+
+    BackHandler(onBack = closeAndClearSearch)
+
+    val gridState = rememberLazyGridState()
+    var dragOffsetY by remember { mutableFloatStateOf(0f) }
+    val animatedDragOffsetY by animateFloatAsState(
+        targetValue = dragOffsetY,
+        label = "drawer_swipe_down_offset"
+    )
+
+    // NestedScrollConnection so pulling down when the app grid is at the top smoothly drags the App Drawer down and closes it
+    val drawerNestedScrollConnection = remember(gridState) {
+        object : NestedScrollConnection {
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                // If user already pulled the drawer partially down and now pushes back up, consume the upward delta first
+                if (dragOffsetY > 0f && available.y < 0f) {
+                    val consumedY = available.y.coerceAtLeast(-dragOffsetY)
+                    dragOffsetY = (dragOffsetY + consumedY).coerceAtLeast(0f)
+                    return Offset(0f, consumedY)
+                }
+                return Offset.Zero
+            }
+
+            override fun onPostScroll(
+                consumed: Offset,
+                available: Offset,
+                source: NestedScrollSource
+            ): Offset {
+                // When user swipes down (available.y > 0) and LazyVerticalGrid has no more upward scroll left, pull the drawer down
+                if (available.y > 0f) {
+                    val atTop = gridState.firstVisibleItemIndex == 0 && gridState.firstVisibleItemScrollOffset == 0
+                    if (atTop || consumed.y == 0f) {
+                        dragOffsetY = (dragOffsetY + available.y * 0.85f).coerceAtLeast(0f)
+                        return Offset(0f, available.y)
+                    }
+                }
+                return Offset.Zero
+            }
+
+            override suspend fun onPreFling(available: Velocity): Velocity {
+                val atTop = gridState.firstVisibleItemIndex == 0 && gridState.firstVisibleItemScrollOffset == 0
+                if (dragOffsetY >= DRAWER_DISMISS_DRAG_THRESHOLD_PX ||
+                    (atTop && available.y >= DRAWER_DISMISS_FLING_VELOCITY)
+                ) {
+                    dragOffsetY = 0f
+                    closeAndClearSearch()
+                    return available
+                }
+                if (dragOffsetY > 0f) {
+                    dragOffsetY = 0f
+                }
+                return Velocity.Zero
+            }
+
+            override suspend fun onPostFling(consumed: Velocity, available: Velocity): Velocity {
+                if (dragOffsetY >= DRAWER_DISMISS_DRAG_THRESHOLD_PX || available.y >= DRAWER_DISMISS_FLING_VELOCITY) {
+                    dragOffsetY = 0f
+                    closeAndClearSearch()
+                } else {
+                    dragOffsetY = 0f
+                }
+                return super.onPostFling(consumed, available)
+            }
+        }
+    }
+
     // Only show AI suggestion banner when viewing the "Uncategorized" tab
     val uncertainSuggestions = remember(filteredApps, state.selectedCategoryId) {
         if (state.selectedCategoryId == DefaultCategory.UNCATEGORIZED.id) {
@@ -130,11 +225,12 @@ fun AppDrawerSheet(
     var showSortDropdown by remember { mutableStateOf(false) }
     var showCategoryManagerModal by remember { mutableStateOf(false) }
 
-    Surface(
-        color = MaterialTheme.colorScheme.background.copy(alpha = 0.96f),
-        contentColor = MaterialTheme.colorScheme.onBackground,
+    FrostedGlassPageSurface(
+        alphaMultiplier = 0.72f,
         modifier = modifier
             .fillMaxSize()
+            .offset { IntOffset(0, animatedDragOffsetY.roundToInt().coerceAtLeast(0)) }
+            .nestedScroll(drawerNestedScrollConnection)
             .testTag("app_drawer_sheet")
     ) {
         Column(
@@ -142,147 +238,197 @@ fun AppDrawerSheet(
                 .fillMaxSize()
                 .windowInsetsPadding(WindowInsets.safeDrawing)
                 .windowInsetsPadding(WindowInsets.navigationBars)
-                .padding(top = 8.dp)
+                .padding(top = 6.dp)
         ) {
-            // Drawer Handle Pill
-            Box(
-                modifier = Modifier
-                    .align(Alignment.CenterHorizontally)
-                    .size(width = 40.dp, height = 4.dp)
-                    .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.40f))
-            )
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-            // Top Search & Action Bar inside App Drawer
-            Row(
+            // Top Swipe-Down Zone (Handle Pill + Header Area) so swiping down anywhere at the top closes the drawer
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 14.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    .pointerInput(Unit) {
+                        var headerDragDy = 0f
+                        detectVerticalDragGestures(
+                            onDragStart = { headerDragDy = 0f },
+                            onVerticalDrag = { change, dragAmount ->
+                                change.consume()
+                                headerDragDy += dragAmount
+                                dragOffsetY = (dragOffsetY + dragAmount).coerceAtLeast(0f)
+                            },
+                            onDragCancel = {
+                                dragOffsetY = 0f
+                            },
+                            onDragEnd = {
+                                if (headerDragDy >= DRAWER_DISMISS_DRAG_THRESHOLD_PX ||
+                                    dragOffsetY >= DRAWER_DISMISS_DRAG_THRESHOLD_PX
+                                ) {
+                                    dragOffsetY = 0f
+                                    closeAndClearSearch()
+                                } else {
+                                    dragOffsetY = 0f
+                                }
+                            }
+                        )
+                    }
             ) {
-                IconButton(
-                    onClick = onCloseDrawer,
-                    modifier = Modifier.testTag("close_drawer_button")
+                // Interactive Drawer Handle Pill (swipe down or tap to close)
+                Row(
+                    modifier = Modifier
+                        .align(Alignment.CenterHorizontally)
+                        .clip(RoundedCornerShape(16.dp))
+                        .clickable(onClick = closeAndClearSearch)
+                        .padding(horizontal = 24.dp, vertical = 4.dp)
+                        .testTag("drawer_swipe_handle"),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
+                    Box(
+                        modifier = Modifier
+                            .size(width = 42.dp, height = 4.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f))
+                    )
                     Icon(
-                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = "Back to Home",
-                        tint = MaterialTheme.colorScheme.onSurface
+                        imageVector = Icons.Default.KeyboardArrowDown,
+                        contentDescription = "Swipe down to close App Drawer",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.70f),
+                        modifier = Modifier.size(16.dp)
                     )
                 }
 
-                OutlinedTextField(
-                    value = localSearchText,
-                    onValueChange = { newText ->
-                        localSearchText = newText
-                        onUpdateSearchQuery(newText)
-                    },
-                    placeholder = {
-                        Text(
-                            text = "Search apps…",
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    },
-                    leadingIcon = {
-                        Icon(
-                            imageVector = Icons.Default.Search,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary
-                        )
-                    },
-                    trailingIcon = {
-                        if (localSearchText.isNotEmpty()) {
-                            IconButton(
-                                onClick = {
-                                    localSearchText = ""
-                                    onUpdateSearchQuery("")
-                                }
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Close,
-                                    contentDescription = "Clear search",
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                        }
-                    },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                    keyboardActions = KeyboardActions(
-                        onSearch = {
-                            focusManager.clearFocus()
-                            filteredApps.firstOrNull()?.let { onLaunchApp(it) }
-                        }
-                    ),
-                    shape = RoundedCornerShape(26.dp),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = MaterialTheme.colorScheme.onSurface,
-                        unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
-                        cursorColor = MaterialTheme.colorScheme.primary,
-                        focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
-                        unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.38f),
-                        focusedBorderColor = MaterialTheme.colorScheme.primary,
-                        unfocusedBorderColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.16f)
-                    ),
-                    modifier = Modifier
-                        .weight(1f)
-                        .testTag("drawer_search_input")
-                )
+                Spacer(modifier = Modifier.height(6.dp))
 
-                Box {
+                // Top Search & Action Bar inside App Drawer
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
                     IconButton(
-                        onClick = { showSortDropdown = true },
-                        modifier = Modifier.testTag("drawer_sort_button")
+                        onClick = closeAndClearSearch,
+                        modifier = Modifier.testTag("close_drawer_button")
                     ) {
                         Icon(
-                            imageVector = Icons.AutoMirrored.Filled.Sort,
-                            contentDescription = "Sort Apps",
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "Back to Home",
                             tint = MaterialTheme.colorScheme.onSurface
                         )
                     }
-                    DropdownMenu(
-                        expanded = showSortDropdown,
-                        onDismissRequest = { showSortDropdown = false }
-                    ) {
-                        for (mode in DrawerSortMode.entries) {
-                            DropdownMenuItem(
-                                text = {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                    ) {
-                                        Text(mode.displayName)
-                                        if (settings.drawerSortMode == mode.id) {
-                                            Icon(
-                                                imageVector = Icons.Default.Check,
-                                                contentDescription = null,
-                                                tint = MaterialTheme.colorScheme.primary,
-                                                modifier = Modifier.size(16.dp)
-                                            )
-                                        }
+
+                    OutlinedTextField(
+                        value = localSearchText,
+                        onValueChange = { newText ->
+                            localSearchText = newText
+                            onUpdateSearchQuery(newText)
+                        },
+                        placeholder = {
+                            Text(
+                                text = "Search apps…",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        },
+                        leadingIcon = {
+                            Icon(
+                                imageVector = Icons.Default.Search,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        },
+                        trailingIcon = {
+                            if (localSearchText.isNotEmpty()) {
+                                IconButton(
+                                    onClick = {
+                                        localSearchText = ""
+                                        onUpdateSearchQuery("")
                                     }
-                                },
-                                onClick = {
-                                    onChangeSortMode(mode.id)
-                                    showSortDropdown = false
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Close,
+                                        contentDescription = "Clear search",
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
                                 }
+                            }
+                        },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                        keyboardActions = KeyboardActions(
+                            onSearch = {
+                                focusManager.clearFocus()
+                                filteredApps.firstOrNull()?.let { app ->
+                                    localSearchText = ""
+                                    onUpdateSearchQuery("")
+                                    onLaunchApp(app)
+                                }
+                            }
+                        ),
+                        shape = RoundedCornerShape(26.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                            unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
+                            cursorColor = MaterialTheme.colorScheme.primary,
+                            focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.50f),
+                            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.34f),
+                            focusedBorderColor = MaterialTheme.colorScheme.primary,
+                            unfocusedBorderColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.18f)
+                        ),
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("drawer_search_input")
+                    )
+
+                    Box {
+                        IconButton(
+                            onClick = { showSortDropdown = true },
+                            modifier = Modifier.testTag("drawer_sort_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.Sort,
+                                contentDescription = "Sort Apps",
+                                tint = MaterialTheme.colorScheme.onSurface
                             )
                         }
+                        DropdownMenu(
+                            expanded = showSortDropdown,
+                            onDismissRequest = { showSortDropdown = false }
+                        ) {
+                            for (mode in DrawerSortMode.entries) {
+                                DropdownMenuItem(
+                                    text = {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            Text(mode.displayName)
+                                            if (settings.drawerSortMode == mode.id) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Check,
+                                                    contentDescription = null,
+                                                    tint = MaterialTheme.colorScheme.primary,
+                                                    modifier = Modifier.size(16.dp)
+                                                )
+                                            }
+                                        }
+                                    },
+                                    onClick = {
+                                        onChangeSortMode(mode.id)
+                                        showSortDropdown = false
+                                    }
+                                )
+                            }
+                        }
                     }
-                }
 
-                IconButton(
-                    onClick = { showCategoryManagerModal = true },
-                    modifier = Modifier.testTag("open_category_manager_button")
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Category,
-                        contentDescription = "Manage Categories",
-                        tint = MaterialTheme.colorScheme.primary
-                    )
+                    IconButton(
+                        onClick = { showCategoryManagerModal = true },
+                        modifier = Modifier.testTag("open_category_manager_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Category,
+                            contentDescription = "Manage Categories",
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    }
                 }
             }
 
@@ -301,7 +447,7 @@ fun AppDrawerSheet(
                         val isSelected = cat.id == state.selectedCategoryId
                         FrostedGlassBox(
                             shape = RoundedCornerShape(20.dp),
-                            alphaOverride = if (isSelected) 0.95f else 0.55f,
+                            alphaOverride = if (isSelected) 0.90f else 0.48f,
                             tintOverride = if (isSelected) {
                                 MaterialTheme.colorScheme.primaryContainer
                             } else {
@@ -355,7 +501,7 @@ fun AppDrawerSheet(
                     for (suggestedApp in uncertainSuggestions) {
                         FrostedGlassBox(
                             shape = RoundedCornerShape(16.dp),
-                            alphaOverride = 0.78f,
+                            alphaOverride = 0.68f,
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Row(
@@ -398,6 +544,28 @@ fun AppDrawerSheet(
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
+                        .pointerInput(Unit) {
+                            var emptyDragDy = 0f
+                            detectVerticalDragGestures(
+                                onDragStart = { emptyDragDy = 0f },
+                                onVerticalDrag = { change, dragAmount ->
+                                    change.consume()
+                                    emptyDragDy += dragAmount
+                                    dragOffsetY = (dragOffsetY + dragAmount).coerceAtLeast(0f)
+                                },
+                                onDragCancel = { dragOffsetY = 0f },
+                                onDragEnd = {
+                                    if (emptyDragDy >= DRAWER_DISMISS_DRAG_THRESHOLD_PX ||
+                                        dragOffsetY >= DRAWER_DISMISS_DRAG_THRESHOLD_PX
+                                    ) {
+                                        dragOffsetY = 0f
+                                        closeAndClearSearch()
+                                    } else {
+                                        dragOffsetY = 0f
+                                    }
+                                }
+                            )
+                        }
                         .padding(32.dp),
                     contentAlignment = Alignment.Center
                 ) {
@@ -428,6 +596,7 @@ fun AppDrawerSheet(
                 }
             } else {
                 LazyVerticalGrid(
+                    state = gridState,
                     columns = GridCells.Fixed(settings.drawerGridColumns.coerceIn(3, 6)),
                     contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp),
                     verticalArrangement = Arrangement.spacedBy(14.dp),
@@ -446,7 +615,11 @@ fun AppDrawerSheet(
                             showLabel = settings.showDrawerAppLabels,
                             showCategoryBadge = showConfidenceBadges,
                             labelColor = MaterialTheme.colorScheme.onSurface,
-                            onClick = { onLaunchApp(app) },
+                            onClick = {
+                                localSearchText = ""
+                                onUpdateSearchQuery("")
+                                onLaunchApp(app)
+                            },
                             onLongClick = { onLongPressApp(app) }
                         )
                     }

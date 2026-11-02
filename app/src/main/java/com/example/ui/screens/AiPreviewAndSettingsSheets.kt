@@ -68,6 +68,7 @@ import com.example.domain.model.ArrangementMode
 import com.example.domain.model.IconShapeOption
 import com.example.engine.SystemWidgetProviderItem
 import com.example.ui.components.FrostedGlassBox
+import com.example.ui.components.FrostedGlassPageSurface
 import com.example.ui.theme.AccentColors
 import com.example.ui.viewmodel.LauncherUiState
 
@@ -91,9 +92,8 @@ fun AiLayoutPreviewSheet(
         state.installedApps.associateBy { it.packageName }
     }
 
-    Surface(
-        color = MaterialTheme.colorScheme.background.copy(alpha = 0.97f),
-        contentColor = MaterialTheme.colorScheme.onBackground,
+    FrostedGlassPageSurface(
+        alphaMultiplier = 0.72f,
         modifier = modifier
             .fillMaxSize()
             .testTag("ai_organizer_preview_sheet")
@@ -316,9 +316,8 @@ fun WidgetPickerSheet(
 ) {
     BackHandler(onBack = onClose)
 
-    Surface(
-        color = MaterialTheme.colorScheme.background.copy(alpha = 0.97f),
-        contentColor = MaterialTheme.colorScheme.onBackground,
+    FrostedGlassPageSurface(
+        alphaMultiplier = 0.72f,
         modifier = modifier
             .fillMaxSize()
             .testTag("widget_picker_sheet")
@@ -421,9 +420,8 @@ fun SettingsAndCustomizationSheet(
 
     val tabs = listOf("Home & Grid", "Drawer", "Theme & Glass", "Gestures", "Privacy & Backup")
 
-    Surface(
-        color = MaterialTheme.colorScheme.background.copy(alpha = 0.97f),
-        contentColor = MaterialTheme.colorScheme.onBackground,
+    FrostedGlassPageSurface(
+        alphaMultiplier = 0.74f,
         modifier = modifier
             .fillMaxSize()
             .testTag("settings_customization_sheet")

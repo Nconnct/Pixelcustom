@@ -268,7 +268,7 @@ class LauncherViewModel(
 
         when (sheet) {
             ActiveOverlaySheet.UNIFIED_SEARCH -> {
-                updateUnifiedSearchQuery(_searchState.value.query, immediate = true)
+                updateUnifiedSearchQuery("", immediate = true)
             }
             ActiveOverlaySheet.APP_DRAWER -> {
                 updateDrawerSearchQuery("")
@@ -293,8 +293,24 @@ class LauncherViewModel(
         _openedFolderId.value = null
         _contextMenuAppPkg.value = null
         _contextMenuHomeItemId.value = null
+        clearAllSearchQueries()
+    }
+
+    fun clearAllSearchQueries() {
         updateDrawerSearchQuery("")
-        _searchState.update { it.copy(activeWebViewUrl = null, isSearching = false) }
+        unifiedSearchJob?.cancel()
+        _rawUnifiedSearchQuery.value = ""
+        _searchState.update {
+            it.copy(
+                query = "",
+                debouncedQuery = "",
+                isSearching = false,
+                activeWebViewUrl = null
+            )
+        }
+        viewModelScope.launch {
+            executeUnifiedSearchFilter("")
+        }
     }
 
     fun selectDrawerCategory(categoryId: String) {
@@ -347,6 +363,7 @@ class LauncherViewModel(
     }
 
     fun launchApp(app: AppInfo) {
+        clearAllSearchQueries()
         viewModelScope.launch {
             val ok = repository.launchAppAndRecordUsage(app.packageName, app.activityName)
             if (!ok) {

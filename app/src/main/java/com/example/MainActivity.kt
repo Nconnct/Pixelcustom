@@ -38,6 +38,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
@@ -159,10 +160,16 @@ fun PixelCategoryLauncherRoot(
             .fillMaxSize()
             .testTag("launcher_root_container")
     ) {
-        // 1. Dynamic Pixel Material You Wallpaper Background
+        // 1. Dynamic Pixel Material You Wallpaper Background (blurs smoothly behind Frosted Glass overlay pages)
+        val wallpaperBlur = if (uiState.activeOverlay != ActiveOverlaySheet.NONE) {
+            tokens.blurRadiusDp
+        } else {
+            0.dp
+        }
         PixelWallpaperBackground(
             presetId = uiState.settings.wallpaperPresetId,
-            isDark = tokens.isDarkTheme
+            isDark = tokens.isDarkTheme,
+            modifier = Modifier.blur(wallpaperBlur)
         )
 
         // 2. Main Home Screen Workspace (Rendered only when no full-screen overlay sheet is open so screens never overlap!)
