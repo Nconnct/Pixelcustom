@@ -1,6 +1,6 @@
 {
-  "summary": "Implementation plan for dynamic unread notification count badges on ML folders, showing the real Android system wallpaper with frosted glass blur, and converting the 4-app dock into a borderless frosted glass surface.",
-  "updatedAt": "2026-11-02T17:00:29.209789542Z",
+  "summary": "Implementation plan for restoring vertical swipe gestures (App Drawer & Unified Search), redesigning Home Screen folders as uniform circular frosted glass icons matching app icon dimensions, and enabling a 3-page horizontal Home Screen pager with main folders on Page 1 and extra apps on Pages 2 and 3.",
+  "updatedAt": "2026-11-02T17:59:42.222523894Z",
   "requestFeedback": true,
   "userFacing": true
 }

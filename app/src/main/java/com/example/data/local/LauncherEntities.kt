@@ -99,7 +99,7 @@ data class LauncherSettingsEntity(
     val dockIconCount: Int = 4,
     val showDock: Boolean = true,
     val dockTransparency: Float = 0.68f,
-    val homePageCount: Int = 1,
+    val homePageCount: Int = 3,
     val showAtAGlanceWidget: Boolean = true,
     val folderStyle: String = "FROSTED_GRID",
     val showBottomSearchBar: Boolean = true,

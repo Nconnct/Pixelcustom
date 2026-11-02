@@ -3,12 +3,14 @@ package com.example.ui.screens
 import android.content.Intent
 import android.net.Uri
 import android.provider.Settings
+import android.view.HapticFeedbackConstants
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -46,9 +48,7 @@ import androidx.compose.material.icons.filled.OpenWith
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StarBorder
-import androidx.compose.material.icons.filled.Undo
 import androidx.compose.material.icons.filled.Widgets
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
@@ -68,10 +68,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import android.view.HapticFeedbackConstants
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
@@ -95,6 +96,7 @@ import com.example.ui.components.PixelAtAGlanceHeader
 import com.example.ui.components.PixelBottomSearchBar
 import com.example.ui.viewmodel.ActiveOverlaySheet
 import com.example.ui.viewmodel.LauncherUiState
+import kotlin.math.abs
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -119,11 +121,18 @@ fun HomeScreenContent(
     modifier: Modifier = Modifier
 ) {
     val settings = state.settings
-    val pageCount = maxOf(1, settings.homePageCount)
+    val maxPopulatedPage = remember(state.homeItems) {
+        (state.homeItems.filter { !it.isDockItem }.maxOfOrNull { it.pageIndex } ?: 0) + 1
+    }
+    val pageCount = maxOf(3, settings.homePageCount, maxPopulatedPage)
     val pagerState = rememberPagerState(initialPage = 0, pageCount = { pageCount })
     val coroutineScope = rememberCoroutineScope()
     val haptics = LocalHapticFeedback.current
     val view = LocalView.current
+    val density = LocalDensity.current
+
+    val verticalSwipeThresholdPx = remember(density) { with(density) { 42.dp.toPx() } }
+    val axisLockSlopPx = remember(density) { with(density) { 14.dp.toPx() } }
 
     var showHomeLongPressDialog by remember { mutableStateOf(false) }
     var showCreateFolderDialog by remember { mutableStateOf(false) }
@@ -146,38 +155,64 @@ fun HomeScreenContent(
         modifier = modifier
             .fillMaxSize()
             .windowInsetsPadding(WindowInsets.safeDrawing)
-            .pointerInput(settings.swipeUpAction, settings.swipeDownAction, state.openedFolder) {
-                if (state.openedFolder != null) return@pointerInput
-                var accumulatedDy = 0f
-                var thresholdHapticFired = false
-                detectVerticalDragGestures(
-                    onDragStart = {
-                        accumulatedDy = 0f
-                        thresholdHapticFired = false
-                    },
-                    onVerticalDrag = { _, dragAmount ->
-                        accumulatedDy += dragAmount
-                        if (!thresholdHapticFired && (accumulatedDy < -120f || accumulatedDy > 130f)) {
-                            thresholdHapticFired = true
-                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
-                        }
-                    },
-                    onDragEnd = {
-                        if (accumulatedDy < -120f) {
-                            when (settings.swipeUpAction) {
-                                "OPEN_SEARCH" -> onOpenOverlay(ActiveOverlaySheet.UNIFIED_SEARCH)
-                                "AI_ORGANIZE_PREVIEW" -> onOpenOverlay(ActiveOverlaySheet.AI_ORGANIZER_PREVIEW)
-                                else -> onOpenOverlay(ActiveOverlaySheet.APP_DRAWER)
+            .pointerInput(
+                settings.swipeUpAction,
+                settings.swipeDownAction,
+                state.openedFolder,
+                showHomeLongPressDialog,
+                showCreateFolderDialog
+            ) {
+                if (state.openedFolder != null || showHomeLongPressDialog || showCreateFolderDialog) {
+                    return@pointerInput
+                }
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                    var totalDx = 0f
+                    var totalDy = 0f
+                    var lockedHorizontal = false
+                    var gestureTriggered = false
+
+                    while (true) {
+                        val event = awaitPointerEvent(PointerEventPass.Initial)
+                        val change = event.changes.firstOrNull { it.id == down.id }
+                            ?: event.changes.firstOrNull()
+                            ?: break
+                        if (!change.pressed) break
+
+                        val dx = change.position.x - change.previousPosition.x
+                        val dy = change.position.y - change.previousPosition.y
+                        totalDx += dx
+                        totalDy += dy
+
+                        if (!lockedHorizontal && !gestureTriggered) {
+                            if (abs(totalDx) > abs(totalDy) * 1.15f && abs(totalDx) > axisLockSlopPx) {
+                                // Horizontal swipe: let HorizontalPager handle left/right page navigation
+                                lockedHorizontal = true
+                            } else if (abs(totalDy) > abs(totalDx) * 1.15f && abs(totalDy) >= verticalSwipeThresholdPx) {
+                                gestureTriggered = true
+                                change.consume()
+                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                                if (totalDy < 0f) {
+                                    // Swipe Up -> Open App Drawer (default)
+                                    when (settings.swipeUpAction) {
+                                        "OPEN_SEARCH" -> onOpenOverlay(ActiveOverlaySheet.UNIFIED_SEARCH)
+                                        "AI_ORGANIZE_PREVIEW" -> onOpenOverlay(ActiveOverlaySheet.AI_ORGANIZER_PREVIEW)
+                                        else -> onOpenOverlay(ActiveOverlaySheet.APP_DRAWER)
+                                    }
+                                } else {
+                                    // Swipe Down -> Open Unified Search (default)
+                                    when (settings.swipeDownAction) {
+                                        "OPEN_DRAWER" -> onOpenOverlay(ActiveOverlaySheet.APP_DRAWER)
+                                        else -> onOpenOverlay(ActiveOverlaySheet.UNIFIED_SEARCH)
+                                    }
+                                }
                             }
-                        } else if (accumulatedDy > 130f) {
-                            when (settings.swipeDownAction) {
-                                "OPEN_DRAWER" -> onOpenOverlay(ActiveOverlaySheet.APP_DRAWER)
-                                else -> onOpenOverlay(ActiveOverlaySheet.UNIFIED_SEARCH)
-                            }
+                        } else if (gestureTriggered) {
+                            change.consume()
                         }
                     }
-                )
+                }
             }
             .pointerInput(Unit) {
                 detectTapGestures(
@@ -207,7 +242,7 @@ fun HomeScreenContent(
                 )
             }
 
-            // Active Move Mode Banner (Undo Layout has been moved inside the Arrange / AI Organizer sheet)
+            // Active Move Mode Banner
             if (movingHomeItem != null) {
                 FrostedGlassBox(
                     shape = RoundedCornerShape(16.dp),
@@ -235,7 +270,7 @@ fun HomeScreenContent(
                 }
             }
 
-            // 2. Multi-Page Workspace Grid with Adaptive iOS-Style Bento Folders
+            // 2. 3-Page Horizontal Home Screen Workspace Grid (Page 1: Smart Folders, Pages 2 & 3: Extra Apps)
             HorizontalPager(
                 state = pagerState,
                 modifier = Modifier
@@ -243,22 +278,86 @@ fun HomeScreenContent(
                     .fillMaxWidth()
                     .testTag("home_workspace_pager")
             ) { pageIndex ->
-                val pageItems = remember(state.homeItems, pageIndex) {
+                val rawPageItems = remember(state.homeItems, pageIndex) {
                     state.homeItems.filter { !it.isDockItem && it.pageIndex == pageIndex }
                 }
-                val widgetsOnPage = remember(pageItems) {
-                    pageItems.filter { it.itemType == HomeItemType.WIDGET }
+
+                // Fallback extra apps for Pages 2 and 3 if database hasn't populated them yet
+                val effectivePageItems = remember(rawPageItems, state.installedApps, state.homeItems, pageIndex, settings.homeGridColumns) {
+                    if (rawPageItems.isNotEmpty() || pageIndex == 0 || state.installedApps.isEmpty()) {
+                        rawPageItems
+                    } else {
+                        val dockPkgs = state.homeItems.filter { it.isDockItem }.mapNotNullTo(mutableSetOf()) { it.packageName }
+                        val candidateApps = state.installedApps.filter { it.packageName !in dockPkgs }
+                        val cols = settings.homeGridColumns.coerceIn(3, 6)
+                        val perPage = cols * 2
+                        val slice = if (pageIndex == 1) {
+                            candidateApps.take(perPage)
+                        } else {
+                            candidateApps.drop(perPage).take(perPage)
+                        }
+                        slice.mapIndexed { idx, app ->
+                            HomeScreenItemModel(
+                                id = -1000L - (pageIndex * 100L + idx),
+                                pageIndex = pageIndex,
+                                row = idx / cols,
+                                column = idx % cols,
+                                isDockItem = false,
+                                itemType = HomeItemType.APP_SHORTCUT,
+                                packageName = app.packageName,
+                                customLabel = app.appName
+                            )
+                        }
+                    }
                 }
-                val nonWidgetItems = remember(pageItems) {
-                    pageItems
+
+                val widgetsOnPage = remember(effectivePageItems) {
+                    effectivePageItems.filter { it.itemType == HomeItemType.WIDGET }
+                }
+                val nonWidgetItems = remember(effectivePageItems) {
+                    effectivePageItems
                         .filter { it.itemType != HomeItemType.WIDGET }
                         .sortedWith(compareBy<HomeScreenItemModel> { it.row }.thenBy { it.column })
+                }
+
+                val gridCols = settings.homeGridColumns.coerceIn(3, 6)
+                val totalGridRows = settings.homeGridRows.coerceIn(4, 7)
+                val startRow = if (pageIndex == 0 && settings.showAtAGlanceWidget) 1 else 0
+                val displayRows = (totalGridRows - startRow).coerceAtLeast(3)
+
+                // Deterministically map every non-widget item to a unique (row, col) cell on this page
+                val cellItemMap = remember(nonWidgetItems, displayRows, gridCols, startRow) {
+                    val map = mutableMapOf<Pair<Int, Int>, HomeScreenItemModel>()
+                    val unplaced = mutableListOf<HomeScreenItemModel>()
+                    for (item in nonWidgetItems) {
+                        val adjRow = (item.row - startRow).coerceIn(0, displayRows - 1)
+                        val adjCol = item.column.coerceIn(0, gridCols - 1)
+                        val key = adjRow to adjCol
+                        if (key !in map) {
+                            map[key] = item
+                        } else {
+                            unplaced.add(item)
+                        }
+                    }
+                    for (item in unplaced) {
+                        outer@ for (r in 0 until displayRows) {
+                            for (c in 0 until gridCols) {
+                                val key = r to c
+                                if (key !in map) {
+                                    map[key] = item
+                                    break@outer
+                                }
+                            }
+                        }
+                    }
+                    map
                 }
 
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(horizontal = 12.dp, vertical = 4.dp),
+                        .padding(horizontal = 12.dp, vertical = 4.dp)
+                        .testTag("home_page_$pageIndex"),
                     verticalArrangement = Arrangement.SpaceBetween
                 ) {
                     for (widgetItem in widgetsOnPage) {
@@ -324,145 +423,107 @@ fun HomeScreenContent(
                         }
                     }
 
-                    if (movingHomeItem != null) {
-                        val startRow = if (pageIndex == 0 && settings.showAtAGlanceWidget) 1 else 0
-                        for (r in startRow until settings.homeGridRows) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .weight(1f),
-                                horizontalArrangement = Arrangement.SpaceEvenly,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                for (c in 0 until settings.homeGridColumns) {
-                                    val cellItem = pageItems.firstOrNull {
-                                        it.row == r && it.column == c && it.itemType != HomeItemType.WIDGET
-                                    }
-
-                                    Box(
-                                        modifier = Modifier
-                                            .weight(1f)
-                                            .fillMaxSize()
-                                            .padding(2.dp)
-                                            .clip(RoundedCornerShape(14.dp))
-                                            .border(
-                                                1.dp,
-                                                MaterialTheme.colorScheme.primary.copy(alpha = 0.6f),
-                                                RoundedCornerShape(14.dp)
-                                            )
-                                            .clickable {
-                                                onMoveHomeItem(movingHomeItem.id, pageIndex, r, c, false)
-                                                onCancelMoveMode()
-                                            },
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        when (cellItem?.itemType) {
-                                            HomeItemType.APP_SHORTCUT -> {
-                                                val app = cellItem.packageName?.let { appsByPkg[it] }
-                                                if (app != null) {
-                                                    val appUnread = state.notificationCounts[app.packageName] ?: 0
-                                                    LauncherAppTile(
-                                                        app = app,
-                                                        iconSizeDp = settings.homeIconSizeDp.dp,
-                                                        iconScale = settings.iconScale,
-                                                        iconShape = iconShape,
-                                                        showLabel = settings.showHomeIconLabels,
-                                                        notificationCount = appUnread,
-                                                        labelColor = Color.White,
-                                                        onClick = {
-                                                            onMoveHomeItem(movingHomeItem.id, pageIndex, r, c, false)
-                                                            onCancelMoveMode()
-                                                        },
-                                                        onLongClick = {}
-                                                    )
-                                                }
-                                            }
-
-                                            HomeItemType.FOLDER -> {
-                                                val folder = cellItem.folderId?.let { foldersById[it] }
-                                                if (folder != null) {
-                                                    val memberApps = folder.memberPackages.mapNotNull { appsByPkg[it] }
-                                                    val folderUnreadCount = LauncherNotificationListenerService.computeFolderUnreadCount(
-                                                        memberPackages = folder.memberPackages,
-                                                        countsByPackage = state.notificationCounts
-                                                    )
-                                                    LauncherFolderTile(
-                                                        folder = folder,
-                                                        memberApps = memberApps,
-                                                        iconSizeDp = settings.homeIconSizeDp.dp,
-                                                        showLabel = settings.showHomeIconLabels,
-                                                        unreadNotificationCount = folderUnreadCount,
-                                                        onClick = {
-                                                            onMoveHomeItem(movingHomeItem.id, pageIndex, r, c, false)
-                                                            onCancelMoveMode()
-                                                        },
-                                                        onLongClick = {},
-                                                        onLaunchApp = onLaunchApp
-                                                    )
-                                                }
-                                            }
-
-                                            else -> Unit
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    } else {
-                        // Adaptive iOS-Style Bento Flow Layout:
-                        // Folders with more apps (4..5 or 6+) automatically expand into wider & taller iOS App Library pods,
-                        // while folders with fewer apps (1..3) stay compact. Adding apps to a folder dynamically grows it!
-                        @OptIn(ExperimentalLayoutApi::class)
-                        FlowRow(
+                    // Structured Uniform Grid (Rows x Columns) — Circular Frosted Folders & App Icons
+                    for (r in 0 until displayRows) {
+                        val dbRow = r + startRow
+                        Row(
                             modifier = Modifier
-                                .fillMaxSize()
-                                .verticalScroll(rememberScrollState())
-                                .padding(vertical = 6.dp),
+                                .fillMaxWidth()
+                                .weight(1f),
                             horizontalArrangement = Arrangement.SpaceEvenly,
-                            verticalArrangement = Arrangement.spacedBy(14.dp)
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            for (cellItem in nonWidgetItems) {
-                                when (cellItem.itemType) {
-                                    HomeItemType.FOLDER -> {
-                                        val folder = cellItem.folderId?.let { foldersById[it] }
-                                        if (folder != null) {
-                                            val memberApps = folder.memberPackages.mapNotNull { appsByPkg[it] }
-                                            val folderUnreadCount = LauncherNotificationListenerService.computeFolderUnreadCount(
-                                                memberPackages = folder.memberPackages,
-                                                countsByPackage = state.notificationCounts
-                                            )
-                                            LauncherFolderTile(
-                                                folder = folder,
-                                                memberApps = memberApps,
-                                                iconSizeDp = settings.homeIconSizeDp.dp,
-                                                showLabel = settings.showHomeIconLabels,
-                                                unreadNotificationCount = folderUnreadCount,
-                                                onClick = { onOpenFolder(folder.id) },
-                                                onLongClick = { onOpenFolder(folder.id) },
-                                                onLaunchApp = onLaunchApp
-                                            )
+                            for (c in 0 until gridCols) {
+                                val cellItem = cellItemMap[r to c]
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .fillMaxSize()
+                                        .padding(2.dp)
+                                        .then(
+                                            if (movingHomeItem != null) {
+                                                Modifier
+                                                    .clip(RoundedCornerShape(14.dp))
+                                                    .border(
+                                                        1.dp,
+                                                        MaterialTheme.colorScheme.primary.copy(alpha = 0.6f),
+                                                        RoundedCornerShape(14.dp)
+                                                    )
+                                                    .clickable {
+                                                        onMoveHomeItem(movingHomeItem.id, pageIndex, dbRow, c, false)
+                                                        onCancelMoveMode()
+                                                    }
+                                            } else {
+                                                Modifier
+                                            }
+                                        ),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    when (cellItem?.itemType) {
+                                        HomeItemType.FOLDER -> {
+                                            val folder = cellItem.folderId?.let { foldersById[it] }
+                                            if (folder != null) {
+                                                val memberApps = folder.memberPackages.mapNotNull { appsByPkg[it] }
+                                                val folderUnreadCount = LauncherNotificationListenerService.computeFolderUnreadCount(
+                                                    memberPackages = folder.memberPackages,
+                                                    countsByPackage = state.notificationCounts
+                                                )
+                                                LauncherFolderTile(
+                                                    folder = folder,
+                                                    memberApps = memberApps,
+                                                    iconSizeDp = settings.homeIconSizeDp.dp,
+                                                    iconScale = settings.iconScale,
+                                                    showLabel = settings.showHomeIconLabels,
+                                                    unreadNotificationCount = folderUnreadCount,
+                                                    onClick = {
+                                                        if (movingHomeItem != null) {
+                                                            onMoveHomeItem(movingHomeItem.id, pageIndex, dbRow, c, false)
+                                                            onCancelMoveMode()
+                                                        } else {
+                                                            onOpenFolder(folder.id)
+                                                        }
+                                                    },
+                                                    onLongClick = {
+                                                        if (movingHomeItem == null) {
+                                                            onOpenFolder(folder.id)
+                                                        }
+                                                    },
+                                                    onLaunchApp = onLaunchApp
+                                                )
+                                            }
                                         }
-                                    }
 
-                                    HomeItemType.APP_SHORTCUT -> {
-                                        val app = cellItem.packageName?.let { appsByPkg[it] }
-                                        if (app != null) {
-                                            val appUnread = state.notificationCounts[app.packageName] ?: 0
-                                            LauncherAppTile(
-                                                app = app,
-                                                iconSizeDp = settings.homeIconSizeDp.dp,
-                                                iconScale = settings.iconScale,
-                                                iconShape = iconShape,
-                                                showLabel = settings.showHomeIconLabels,
-                                                notificationCount = appUnread,
-                                                labelColor = Color.White,
-                                                onClick = { onLaunchApp(app) },
-                                                onLongClick = { onOpenAppContextMenu(app, cellItem) }
-                                            )
+                                        HomeItemType.APP_SHORTCUT -> {
+                                            val app = cellItem.packageName?.let { appsByPkg[it] }
+                                            if (app != null) {
+                                                val appUnread = state.notificationCounts[app.packageName] ?: 0
+                                                LauncherAppTile(
+                                                    app = app,
+                                                    iconSizeDp = settings.homeIconSizeDp.dp,
+                                                    iconScale = settings.iconScale,
+                                                    iconShape = iconShape,
+                                                    showLabel = settings.showHomeIconLabels,
+                                                    notificationCount = appUnread,
+                                                    labelColor = Color.White,
+                                                    onClick = {
+                                                        if (movingHomeItem != null) {
+                                                            onMoveHomeItem(movingHomeItem.id, pageIndex, dbRow, c, false)
+                                                            onCancelMoveMode()
+                                                        } else {
+                                                            onLaunchApp(app)
+                                                        }
+                                                    },
+                                                    onLongClick = {
+                                                        if (movingHomeItem == null) {
+                                                            onOpenAppContextMenu(app, cellItem)
+                                                        }
+                                                    }
+                                                )
+                                            }
                                         }
-                                    }
 
-                                    else -> Unit
+                                        else -> Unit
+                                    }
                                 }
                             }
                         }
@@ -470,31 +531,43 @@ fun HomeScreenContent(
                 }
             }
 
-            // 3. Page Indicator Dots (only shown when more than 1 page exists)
-            if (pageCount > 1) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 4.dp),
-                    horizontalArrangement = Arrangement.Center,
-                    verticalAlignment = Alignment.CenterVertically
+            // 3. Interactive Frosted Glass Page Indicator Dots (Page 1, Page 2, Page 3)
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp)
+                    .testTag("home_page_indicator"),
+                contentAlignment = Alignment.Center
+            ) {
+                FrostedGlassBox(
+                    shape = CircleShape,
+                    alphaOverride = 0.36f,
+                    showBorder = false,
+                    modifier = Modifier.padding(horizontal = 8.dp)
                 ) {
-                    for (i in 0 until pageCount) {
-                        val isSelected = pagerState.currentPage == i
-                        Box(
-                            modifier = Modifier
-                                .padding(horizontal = 4.dp)
-                                .size(width = if (isSelected) 18.dp else 6.dp, height = 6.dp)
-                                .clip(CircleShape)
-                                .background(
-                                    if (isSelected) Color.White else Color.White.copy(alpha = 0.35f)
-                                )
-                                .clickable {
-                                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                    view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
-                                    coroutineScope.launch { pagerState.animateScrollToPage(i) }
-                                }
-                        )
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        for (i in 0 until pageCount) {
+                            val isSelected = pagerState.currentPage == i
+                            Box(
+                                modifier = Modifier
+                                    .padding(horizontal = 4.dp)
+                                    .size(width = if (isSelected) 20.dp else 7.dp, height = 7.dp)
+                                    .clip(CircleShape)
+                                    .background(
+                                        if (isSelected) Color.White else Color.White.copy(alpha = 0.38f)
+                                    )
+                                    .clickable {
+                                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                                        coroutineScope.launch { pagerState.animateScrollToPage(i) }
+                                    }
+                                    .testTag("page_indicator_dot_$i")
+                            )
+                        }
                     }
                 }
             }

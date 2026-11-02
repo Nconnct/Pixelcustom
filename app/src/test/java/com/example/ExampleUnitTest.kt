@@ -122,12 +122,14 @@ class ExampleUnitTest {
             dockCapacity = 2
         )
 
-        // Clean single-page ML folder arrangement
-        assertEquals(1, preview.pagesCount)
+        // 3-page layout with main ML folders on Page 1 and extra apps on Pages 2 & 3
+        assertEquals(3, preview.pagesCount)
         val folderNames = preview.proposedFolders.map { it.folderName }.toSet()
         assertTrue("Social" in folderNames)
         assertTrue("Banking" in folderNames)
         assertTrue("Productivity" in folderNames)
+        assertTrue(preview.proposedFolders.all { it.pageIndex == 0 })
+        assertTrue(preview.proposedItems.any { !it.isDockItem && it.pageIndex in 1..2 })
 
         // Preserves existing widget
         assertEquals(1, preview.preservedWidgetsCount)

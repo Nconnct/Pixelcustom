@@ -590,11 +590,10 @@ fun LauncherAppTile(
 }
 
 /**
- * Adaptive Modern iOS App Library-style Smart Folder tile on the Home Screen:
- * - Few apps (1..3): Compact iOS Frosted Squircle Folder
- * - Medium apps (4..5): Expanded iOS App Library Pod with 3 direct-launch squircles + mini cluster
- * - Many apps (6+): Big iOS App Library Bento Folder with header pill, 3 large app icons, and 2x2 mini cluster
- * Dynamically grows in size as apps are added to the folder, and displays the unread notification count badge on the top-right corner.
+ * Uniform Circular Frosted Glass Smart Folder tile on the Home Screen:
+ * Matches the exact circular icon size and label footprint of LauncherAppTile,
+ * renders a balanced 2x2 mini-icon preview grid inside the frosted circle,
+ * and displays the dynamic unread notification count badge on the top-right corner.
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -602,6 +601,7 @@ fun LauncherFolderTile(
     folder: FolderModel,
     memberApps: List<AppInfo>,
     iconSizeDp: Dp,
+    iconScale: Float = 1.0f,
     showLabel: Boolean,
     unreadNotificationCount: Int = 0,
     onLaunchApp: (AppInfo) -> Unit = {},
@@ -611,46 +611,21 @@ fun LauncherFolderTile(
 ) {
     val haptics = LocalHapticFeedback.current
     val view = LocalView.current
-    val appCount = memberApps.size
-
-    // Adaptive sizing tier based on number of apps inside the folder:
-    // Tier 0 (Small: 1..3 apps), Tier 1 (Medium: 4..5 apps), Tier 2 (Big iOS App Library: 6+ apps)
-    val sizeTier = when {
-        appCount >= 6 -> 2
-        appCount >= 4 -> 1
-        else -> 0
-    }
-
-    val boxWidth = when (sizeTier) {
-        2 -> (iconSizeDp.value * 2.45f).dp
-        1 -> (iconSizeDp.value * 1.75f).dp
-        else -> (iconSizeDp.value * 1.16f).dp
-    }
-    val boxHeight = when (sizeTier) {
-        2 -> (iconSizeDp.value * 1.72f).dp
-        1 -> (iconSizeDp.value * 1.38f).dp
-        else -> (iconSizeDp.value * 1.16f).dp
-    }
-    val cornerRadius = when (sizeTier) {
-        2 -> 28.dp
-        1 -> 24.dp
-        else -> 22.dp
-    }
+    val scaledSize = (iconSizeDp.value * iconScale.coerceIn(0.75f, 1.25f)).dp
+    val miniIconSize = (scaledSize.value * 0.34f).dp
 
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
         modifier = modifier
-            .animateContentSize(
-                animationSpec = spring(
-                    dampingRatio = Spring.DampingRatioMediumBouncy,
-                    stiffness = Spring.StiffnessMediumLow
-                )
-            )
             .minimumInteractiveComponentSize()
-            .clip(RoundedCornerShape(cornerRadius))
+            .clip(RoundedCornerShape(14.dp))
             .combinedClickable(
-                onClick = onClick,
+                onClick = {
+                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                    onClick()
+                },
                 onLongClick = {
                     haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                     view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
@@ -662,204 +637,30 @@ fun LauncherFolderTile(
     ) {
         Box(contentAlignment = Alignment.TopEnd) {
             FrostedGlassBox(
-                shape = RoundedCornerShape(cornerRadius),
-                alphaOverride = 0.44f,
-                modifier = Modifier
-                    .width(boxWidth)
-                    .height(boxHeight)
+                shape = CircleShape,
+                alphaOverride = 0.48f,
+                modifier = Modifier.size(scaledSize)
             ) {
-                when (sizeTier) {
-                    // Tier 2: Big iOS App Library Bento Folder (6+ apps)
-                    2 -> {
-                        val primarySlotSize = (iconSizeDp.value * 0.56f).dp
-                        val miniClusterSlotSize = (iconSizeDp.value * 0.24f).dp
-                        Column(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(horizontal = 10.dp, vertical = 8.dp),
-                            verticalArrangement = Arrangement.SpaceBetween
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding((scaledSize.value * 0.13f).dp),
+                    verticalArrangement = Arrangement.SpaceEvenly,
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    for (r in 0..1) {
+                        Row(
+                            horizontalArrangement = Arrangement.SpaceEvenly,
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.fillMaxWidth()
                         ) {
-                            // Top Row: 2 Primary App Squircles + 1 Primary App Squircle
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceEvenly,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                for (idx in 0..2) {
-                                    val app = memberApps.getOrNull(idx)
-                                    IosFolderAppSquircle(
-                                        app = app,
-                                        slotSize = primarySlotSize,
-                                        onTap = {
-                                            if (app != null) {
-                                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                                onLaunchApp(app)
-                                            } else {
-                                                onClick()
-                                            }
-                                        }
-                                    )
-                                }
-                            }
-
-                            // Bottom Row: 4th Primary App + 2x2 iOS Mini-Icon Cluster + App Count Pill
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceEvenly,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                val fourthApp = memberApps.getOrNull(3)
-                                IosFolderAppSquircle(
-                                    app = fourthApp,
-                                    slotSize = primarySlotSize,
-                                    onTap = {
-                                        if (fourthApp != null) {
-                                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                            onLaunchApp(fourthApp)
-                                        } else {
-                                            onClick()
-                                        }
-                                    }
+                            for (c in 0..1) {
+                                val idx = r * 2 + c
+                                val app = memberApps.getOrNull(idx)
+                                CircularFolderMiniIcon(
+                                    app = app,
+                                    size = miniIconSize
                                 )
-
-                                // iOS 2x2 Mini Cluster (tapping opens full folder modal)
-                                Box(
-                                    modifier = Modifier
-                                        .size(primarySlotSize)
-                                        .clip(RoundedCornerShape(14.dp))
-                                        .background(Color.White.copy(alpha = 0.14f))
-                                        .clickable(onClick = onClick)
-                                        .padding(3.dp),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Column(
-                                        verticalArrangement = Arrangement.SpaceEvenly,
-                                        horizontalAlignment = Alignment.CenterHorizontally,
-                                        modifier = Modifier.fillMaxSize()
-                                    ) {
-                                        for (mr in 0..1) {
-                                            Row(
-                                                horizontalArrangement = Arrangement.SpaceEvenly,
-                                                modifier = Modifier.fillMaxWidth()
-                                            ) {
-                                                for (mc in 0..1) {
-                                                    val subApp = memberApps.getOrNull(4 + mr * 2 + mc)
-                                                    IosFolderMiniIcon(
-                                                        app = subApp,
-                                                        size = miniClusterSlotSize
-                                                    )
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-
-                                // Frosted iOS App Count Pill
-                                Box(
-                                    modifier = Modifier
-                                        .height(primarySlotSize * 0.68f)
-                                        .clip(RoundedCornerShape(12.dp))
-                                        .background(Color.White.copy(alpha = 0.16f))
-                                        .clickable(onClick = onClick)
-                                        .padding(horizontal = 8.dp),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text(
-                                        text = "${memberApps.size} apps",
-                                        style = MaterialTheme.typography.labelSmall.copy(
-                                            fontSize = 10.sp,
-                                            fontWeight = FontWeight.SemiBold
-                                        ),
-                                        color = Color.White
-                                    )
-                                }
-                            }
-                        }
-                    }
-
-                    // Tier 1: Medium Expanded iOS Folder (4..5 apps)
-                    1 -> {
-                        val primarySlotSize = (iconSizeDp.value * 0.48f).dp
-                        val miniSlotSize = (iconSizeDp.value * 0.20f).dp
-                        Column(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(8.dp),
-                            verticalArrangement = Arrangement.SpaceEvenly,
-                            horizontalAlignment = Alignment.CenterHorizontally
-                        ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceEvenly
-                            ) {
-                                for (idx in 0..1) {
-                                    val app = memberApps.getOrNull(idx)
-                                    IosFolderAppSquircle(
-                                        app = app,
-                                        slotSize = primarySlotSize,
-                                        onTap = {
-                                            if (app != null) onLaunchApp(app) else onClick()
-                                        }
-                                    )
-                                }
-                            }
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceEvenly,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                val thirdApp = memberApps.getOrNull(2)
-                                IosFolderAppSquircle(
-                                    app = thirdApp,
-                                    slotSize = primarySlotSize,
-                                    onTap = {
-                                        if (thirdApp != null) onLaunchApp(thirdApp) else onClick()
-                                    }
-                                )
-                                // 4th quadrant: 2x2 mini cluster for remaining apps
-                                Box(
-                                    modifier = Modifier
-                                        .size(primarySlotSize)
-                                        .clip(RoundedCornerShape(12.dp))
-                                        .background(Color.White.copy(alpha = 0.14f))
-                                        .clickable(onClick = onClick)
-                                        .padding(2.dp),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Row(
-                                        horizontalArrangement = Arrangement.SpaceEvenly,
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        modifier = Modifier.fillMaxWidth()
-                                    ) {
-                                        IosFolderMiniIcon(app = memberApps.getOrNull(3), size = miniSlotSize)
-                                        IosFolderMiniIcon(app = memberApps.getOrNull(4), size = miniSlotSize)
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    // Tier 0: Compact Small iOS Squircle Folder (1..3 apps)
-                    else -> {
-                        val miniSize = (iconSizeDp.value * 0.38f).dp
-                        Column(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(7.dp),
-                            verticalArrangement = Arrangement.SpaceEvenly,
-                            horizontalAlignment = Alignment.CenterHorizontally
-                        ) {
-                            for (r in 0..1) {
-                                Row(
-                                    horizontalArrangement = Arrangement.SpaceEvenly,
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    for (c in 0..1) {
-                                        val idx = r * 2 + c
-                                        val app = memberApps.getOrNull(idx)
-                                        IosFolderMiniIcon(app = app, size = miniSize)
-                                    }
-                                }
                             }
                         }
                     }
@@ -872,13 +673,13 @@ fun LauncherFolderTile(
                 Box(
                     modifier = Modifier
                         .align(Alignment.TopEnd)
-                        .offset(x = 5.dp, y = (-5).dp)
-                        .widthIn(min = 21.dp)
-                        .height(21.dp)
+                        .offset(x = 4.dp, y = (-4).dp)
+                        .widthIn(min = 19.dp)
+                        .height(19.dp)
                         .clip(CircleShape)
                         .background(MaterialTheme.colorScheme.primary)
                         .border(1.5.dp, Color(0xFF0F172A), CircleShape)
-                        .padding(horizontal = 5.dp)
+                        .padding(horizontal = 4.dp)
                         .testTag("folder_badge_${folder.id}"),
                     contentAlignment = Alignment.Center
                 ) {
@@ -895,70 +696,34 @@ fun LauncherFolderTile(
         }
 
         if (showLabel) {
-            Spacer(modifier = Modifier.height(5.dp))
+            Spacer(modifier = Modifier.height(4.dp))
             Text(
                 text = folder.folderName,
-                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
+                style = MaterialTheme.typography.labelLarge,
                 color = Color.White,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 textAlign = TextAlign.Center,
-                modifier = Modifier.widthIn(max = boxWidth + 16.dp)
+                modifier = Modifier.width(74.dp)
             )
         }
     }
 }
 
 @Composable
-private fun IosFolderAppSquircle(
-    app: AppInfo?,
-    slotSize: Dp,
-    onTap: () -> Unit
-) {
-    val squircleShape = RoundedCornerShape(percent = 26)
-    Box(
-        modifier = Modifier
-            .size(slotSize)
-            .clip(squircleShape)
-            .background(Color.White.copy(alpha = 0.18f))
-            .clickable(onClick = onTap),
-        contentAlignment = Alignment.Center
-    ) {
-        if (app?.appIcon != null) {
-            Image(
-                bitmap = app.appIcon,
-                contentDescription = app.appName,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .clip(squircleShape)
-            )
-        } else if (app != null) {
-            Text(
-                text = app.appName.take(1).uppercase(),
-                style = MaterialTheme.typography.labelMedium,
-                color = Color.White,
-                fontWeight = FontWeight.Bold
-            )
-        }
-    }
-}
-
-@Composable
-private fun IosFolderMiniIcon(
+private fun CircularFolderMiniIcon(
     app: AppInfo?,
     size: Dp
 ) {
-    val squircleShape = RoundedCornerShape(percent = 28)
     Box(
         modifier = Modifier
             .size(size)
-            .clip(squircleShape)
+            .clip(CircleShape)
             .background(
                 if (app != null) {
                     MaterialTheme.colorScheme.primary.copy(alpha = 0.28f)
                 } else {
-                    Color.White.copy(alpha = 0.08f)
+                    Color.White.copy(alpha = 0.10f)
                 }
             ),
         contentAlignment = Alignment.Center
@@ -970,7 +735,7 @@ private fun IosFolderMiniIcon(
                 contentScale = ContentScale.Crop,
                 modifier = Modifier
                     .fillMaxSize()
-                    .clip(squircleShape)
+                    .clip(CircleShape)
             )
         } else if (app != null) {
             Text(
@@ -982,3 +747,4 @@ private fun IosFolderMiniIcon(
         }
     }
 }
+

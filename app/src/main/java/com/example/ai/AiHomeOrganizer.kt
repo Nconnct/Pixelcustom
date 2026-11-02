@@ -99,11 +99,11 @@ class AiHomeOrganizer {
             }
         }
 
-        fun nextFreeCellOnSinglePage(): Triple<Int, Int, Int>? {
-            // Row 0 is reserved for the clean Top Date & Time Header; rows 1..(rows-1) hold ML Folders & essentials
-            for (r in 1 until rows) {
+        fun nextFreeCellOnPage(targetPage: Int): Triple<Int, Int, Int>? {
+            val startRow = if (targetPage == 0) 1 else 0
+            for (r in startRow until rows) {
                 for (c in 0 until cols) {
-                    val cell = Triple(0, r, c)
+                    val cell = Triple(targetPage, r, c)
                     if (cell !in occupiedCells) {
                         occupiedCells.add(cell)
                         return cell
@@ -113,12 +113,21 @@ class AiHomeOrganizer {
             return null
         }
 
+        fun nextFreeCellAcrossPages(startPage: Int, maxPageExclusive: Int = 3): Triple<Int, Int, Int>? {
+            for (p in startPage until maxPageExclusive) {
+                val cell = nextFreeCellOnPage(p)
+                if (cell != null) return cell
+            }
+            return null
+        }
+
         return when (mode) {
             ArrangementMode.PIXEL_DEFAULT -> {
-                // Clean single page with top essentials + dock
-                val remaining = rankedApps.filter { it.packageName !in usedPackages }.take(cols * 2)
+                // 3-page standard layout with top-ranked apps across Pages 1, 2, and 3 + dock
+                val maxPerGrid = cols * (rows - 1)
+                val remaining = rankedApps.filter { it.packageName !in usedPackages }.take(maxPerGrid * 3)
                 for (app in remaining) {
-                    val cell = nextFreeCellOnSinglePage() ?: break
+                    val cell = nextFreeCellAcrossPages(startPage = 0, maxPageExclusive = 3) ?: break
                     val (page, r, c) = cell
                     usedPackages.add(app.packageName)
                     proposedItems.add(
@@ -136,21 +145,21 @@ class AiHomeOrganizer {
 
                 ProposedLayoutPreview(
                     mode = ArrangementMode.PIXEL_DEFAULT,
-                    pagesCount = 1,
+                    pagesCount = 3,
                     proposedItems = proposedItems,
                     proposedFolders = emptyList(),
                     dockPackages = dockPackages,
                     preservedWidgetsCount = preservedWidgets.size,
                     summaryPoints = listOf(
-                        "Clean single-page Home Screen with ${dockPackages.size} essential Dock apps",
-                        "Placed ${remaining.size} top-ranked apps neatly on Page 1",
+                        "3-page horizontal Home Screen with ${dockPackages.size} essential Dock apps",
+                        "Distributed ${remaining.size} apps cleanly across Pages 1, 2, and 3",
                         "Preserved ${preservedWidgets.size} active widgets and ${pinnedShortcuts.size} pinned shortcuts"
                     )
                 )
             }
 
             ArrangementMode.AI_ORGANIZED, ArrangementMode.CUSTOM_LAYOUT -> {
-                // Group apps into ML Smart Folders (Productivity, Social, Banking, Media, Utilities, Shopping, Games)
+                // Page 1 (pageIndex = 0): Main ML Smart Folders (Productivity, Social, Banking, Media, Shopping, Games, Utilities)
                 val folderClusters = listOf(
                     Triple(
                         "Productivity",
@@ -202,9 +211,9 @@ class AiHomeOrganizer {
                             (app.categoryId in catIds || app.allCategoryIds.any { it in catIds })
                     }
                     if (matchingApps.isNotEmpty()) {
-                        val cell = nextFreeCellOnSinglePage() ?: break
+                        val cell = nextFreeCellOnPage(targetPage = 0) ?: break
                         val (page, r, c) = cell
-                        val folderMembers = matchingApps.take(12).map { it.packageName }
+                        val folderMembers = matchingApps.take(8).map { it.packageName }
                         usedPackages.addAll(folderMembers)
                         val folderId = nextFolderTempId++
                         proposedFolders.add(
@@ -232,15 +241,36 @@ class AiHomeOrganizer {
                     }
                 }
 
-                // Place at most 1 clean row of top remaining favorite/essential shortcuts on Page 1
-                val standaloneApps = rankedApps
-                    .filter { it.packageName !in usedPackages }
-                    .take(cols)
+                // Pages 2 & 3 (pageIndex = 1 and pageIndex = 2): Extra & frequent individual apps
+                val unplacedApps = rankedApps.filter { it.packageName !in usedPackages }
+                val nonDockApps = rankedApps.filter { it.packageName !in dockPackages }
+                val extraAppsForPages2And3 = (unplacedApps + nonDockApps)
+                    .distinctBy { it.packageName }
+                    .take(cols * 4)
 
-                for (app in standaloneApps) {
-                    val cell = nextFreeCellOnSinglePage() ?: break
+                val halfCount = (extraAppsForPages2And3.size + 1) / 2
+                val page2Apps = extraAppsForPages2And3.take(halfCount)
+                val page3Apps = extraAppsForPages2And3.drop(halfCount)
+
+                for (app in page2Apps) {
+                    val cell = nextFreeCellOnPage(targetPage = 1) ?: break
                     val (page, r, c) = cell
-                    usedPackages.add(app.packageName)
+                    proposedItems.add(
+                        HomeScreenItemModel(
+                            pageIndex = page,
+                            row = r,
+                            column = c,
+                            isDockItem = false,
+                            itemType = HomeItemType.APP_SHORTCUT,
+                            packageName = app.packageName,
+                            customLabel = app.appName
+                        )
+                    )
+                }
+
+                for (app in page3Apps) {
+                    val cell = nextFreeCellOnPage(targetPage = 2) ?: break
+                    val (page, r, c) = cell
                     proposedItems.add(
                         HomeScreenItemModel(
                             pageIndex = page,
@@ -256,15 +286,15 @@ class AiHomeOrganizer {
 
                 ProposedLayoutPreview(
                     mode = ArrangementMode.AI_ORGANIZED,
-                    pagesCount = 1,
+                    pagesCount = 3,
                     proposedItems = proposedItems,
                     proposedFolders = proposedFolders,
                     dockPackages = dockPackages,
                     preservedWidgetsCount = preservedWidgets.size,
                     summaryPoints = listOf(
-                        "Organized into ${proposedFolders.size} ML Smart Folders (${proposedFolders.joinToString(", ") { it.folderName }})",
-                        "Clean single-page Home Screen with zero multi-page icon clutter",
-                        "Pinned ${dockPackages.size} essential communication & favorite apps to the Dock",
+                        "Page 1: ${proposedFolders.size} uniform circular ML Smart Folders (${proposedFolders.joinToString(", ") { it.folderName }})",
+                        "Pages 2 & 3: ${page2Apps.size + page3Apps.size} extra apps arranged across horizontal pages",
+                        "Pinned ${dockPackages.size} essential communication & favorite apps to the Frosted Dock",
                         "Enriched categories using Online Store Metadata + AI & Offline TFLite ML"
                     )
                 )

@@ -140,10 +140,12 @@ class LauncherRepository(
     }
 
     suspend fun initializeLauncherState() = withContext(Dispatchers.IO) {
-        // 1. Seed default settings if absent
+        // 1. Seed default settings if absent, and ensure at least 3 Home Screen pages
         val existingSettings = dao.getSettingsSnapshot()
         if (existingSettings == null) {
-            dao.upsertSettings(LauncherSettingsEntity())
+            dao.upsertSettings(LauncherSettingsEntity(homePageCount = 3))
+        } else if (existingSettings.homePageCount < 3) {
+            dao.upsertSettings(existingSettings.copy(homePageCount = 3))
         }
 
         // 2. Seed default 18 categories without overwriting user modifications
@@ -154,13 +156,14 @@ class LauncherRepository(
             dao.upsertCategories(missingCats)
         }
 
-        // 3. Seed default home pages if absent
+        // 3. Seed 3 default home pages if absent or fewer than 3
         val existingPages = dao.getHomePagesSnapshot()
-        if (existingPages.isEmpty()) {
+        if (existingPages.size < 3) {
             dao.upsertHomePages(
                 listOf(
                     HomeScreenPageEntity(pageIndex = 0, title = "Home", hasAtAGlanceWidget = true),
-                    HomeScreenPageEntity(pageIndex = 1, title = "Workspace 2", hasAtAGlanceWidget = false)
+                    HomeScreenPageEntity(pageIndex = 1, title = "Workspace 2", hasAtAGlanceWidget = false),
+                    HomeScreenPageEntity(pageIndex = 2, title = "Workspace 3", hasAtAGlanceWidget = false)
                 )
             )
         }
@@ -172,10 +175,11 @@ class LauncherRepository(
         // 5. Discover installed apps and run offline AI classification where needed
         refreshInstalledApps()
 
-        // 6. Seed clean ML Smart Folders home layout if home_screen_items or folders are empty
+        // 6. Seed 3-page ML Smart Folders (Page 1) + Extra Apps (Pages 2 & 3) if empty or still on legacy 1-page layout
         val currentHomeItems = dao.getHomeItemsSnapshot()
         val currentFolders = dao.getFoldersSnapshot()
-        if (currentHomeItems.isEmpty() || currentFolders.isEmpty()) {
+        val hasMultiPageItems = currentHomeItems.any { !it.isDockItem && it.pageIndex >= 1 }
+        if (currentHomeItems.isEmpty() || currentFolders.isEmpty() || !hasMultiPageItems) {
             seedDefaultHomeLayout()
         }
     }
@@ -428,9 +432,12 @@ class LauncherRepository(
             dockCapacity = settings.dockIconCount
         )
         applyProposedLayout(preview, saveUndoSnapshot = false)
-        if (settings.homePageCount > 1) {
-            dao.upsertSettings(settings.copy(homePageCount = 1, arrangementMode = ArrangementMode.AI_ORGANIZED.name))
-        }
+        dao.upsertSettings(
+            settings.copy(
+                homePageCount = maxOf(3, preview.pagesCount),
+                arrangementMode = ArrangementMode.AI_ORGANIZED.name
+            )
+        )
     }
 
     suspend fun assignAppToCategoryManually(
@@ -582,7 +589,7 @@ class LauncherRepository(
             Triple(it.pageIndex, it.row, it.column)
         }
         var targetCell = Triple(0, 1, 0)
-        outer@ for (p in 0 until maxOf(2, settings.homePageCount)) {
+        outer@ for (p in 0 until maxOf(3, settings.homePageCount)) {
             val startRow = if (p == 0 && settings.showAtAGlanceWidget) 1 else 0
             for (r in startRow until settings.homeGridRows) {
                 for (c in 0 until settings.homeGridColumns) {
@@ -660,7 +667,7 @@ class LauncherRepository(
             Triple(it.pageIndex, it.row, it.column)
         }
         var cell = Triple(pageIndex, 1, 0)
-        outer@ for (p in pageIndex until maxOf(2, settings.homePageCount)) {
+        outer@ for (p in pageIndex until maxOf(3, settings.homePageCount)) {
             val startRow = if (p == 0 && settings.showAtAGlanceWidget) 1 else 0
             for (r in startRow until settings.homeGridRows) {
                 for (c in 0 until settings.homeGridColumns) {
