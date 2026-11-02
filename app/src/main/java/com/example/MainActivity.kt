@@ -223,6 +223,8 @@ fun PixelCategoryLauncherRoot(
                 onOpenAppContextMenu = viewModel::openAppContextMenu,
                 onRemoveHomeItem = viewModel::removeShortcutFromHome,
                 onMoveHomeItem = viewModel::moveHomeItem,
+                onMergeHomeItems = viewModel::mergeHomeItems,
+                onToggleFolderStyle = viewModel::toggleFolderStyle,
                 onCreateSmartFolder = viewModel::createSmartFolder,
                 onUpdateFolder = viewModel::updateFolder,
                 onDeleteFolder = viewModel::deleteFolder,

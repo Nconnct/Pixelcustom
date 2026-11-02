@@ -453,6 +453,24 @@ class LauncherViewModel(
         }
     }
 
+    fun mergeHomeItems(draggedItemId: Long, targetItemId: Long) {
+        viewModelScope.launch {
+            val folderName = repository.mergeHomeItemsIntoFolder(draggedItemId, targetItemId)
+            if (folderName != null) {
+                showBanner("Merged into '$folderName'")
+            }
+        }
+    }
+
+    fun toggleFolderStyle(folderId: Long) {
+        viewModelScope.launch {
+            val newStyleLabel = repository.toggleFolderDisplayStyle(folderId)
+            if (newStyleLabel != null) {
+                showBanner("Folder style: $newStyleLabel")
+            }
+        }
+    }
+
     fun createSmartFolder(folderName: String, memberPackages: List<String>, colorHex: String, pageIndex: Int = 0) {
         viewModelScope.launch {
             repository.createFolderOnHome(folderName, memberPackages, colorHex, pageIndex)

@@ -363,7 +363,7 @@ fun PixelAtAGlanceHeader(
 }
 
 /**
- * Pixel-style Frosted Bottom Search Pill (App Drawer button removed — swipe up opens the App Drawer).
+ * Compact centered frosted glass Search pill above the dock matching the user's screenshot.
  */
 @Composable
 fun PixelBottomSearchBar(
@@ -372,45 +372,47 @@ fun PixelBottomSearchBar(
     onOpenAiOrganizerClick: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
-    val tokens = LocalLauncherTokens.current
     val haptics = LocalHapticFeedback.current
     val view = LocalView.current
 
-    FrostedGlassBox(
-        shape = RoundedCornerShape(tokens.searchCornerRadius),
-        alphaOverride = (tokens.frostedSurfaceAlpha * 0.58f).coerceIn(0.22f, 0.48f),
-        showBorder = false,
-        modifier = modifier
-            .fillMaxWidth()
-            .height(50.dp)
-            .clickable {
-                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
-                onSearchBarClick()
-            }
-            .testTag("pixel_bottom_search_bar")
+    Box(
+        modifier = modifier.fillMaxWidth(),
+        contentAlignment = Alignment.Center
     ) {
-        Row(
+        FrostedGlassBox(
+            shape = CircleShape,
+            alphaOverride = 0.42f,
+            showBorder = false,
             modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = 16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                .height(36.dp)
+                .clickable {
+                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                    onSearchBarClick()
+                }
+                .testTag("pixel_bottom_search_bar")
         ) {
-            Icon(
-                imageVector = Icons.Default.Search,
-                contentDescription = "Search",
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(21.dp)
-            )
-            Text(
-                text = stringResource(R.string.search_hint),
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f)
-            )
+            Row(
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Search,
+                    contentDescription = "Search",
+                    tint = Color.White.copy(alpha = 0.92f),
+                    modifier = Modifier.size(16.dp)
+                )
+                Text(
+                    text = "Search",
+                    style = MaterialTheme.typography.labelLarge.copy(
+                        fontWeight = FontWeight.Medium,
+                        fontSize = 13.sp
+                    ),
+                    color = Color.White.copy(alpha = 0.92f),
+                    maxLines = 1
+                )
+            }
         }
     }
 }
@@ -476,7 +478,7 @@ fun LauncherAppTile(
                     onLongClick()
                 }
             )
-            .padding(vertical = 4.dp, horizontal = 4.dp)
+            .padding(vertical = 2.dp, horizontal = 2.dp)
             .testTag("app_tile_${app.packageName}")
     ) {
         Box(contentAlignment = Alignment.BottomEnd) {
@@ -570,17 +572,18 @@ fun LauncherAppTile(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 textAlign = TextAlign.Center,
-                modifier = Modifier.width(74.dp)
+                modifier = Modifier.width(68.dp)
             )
         }
     }
 }
 
 /**
- * Authentic iOS Frosted Glass Folder tile on the Home Screen:
- * Renders a borderless iOS continuous squircle (`RoundedCornerShape(percent = 26)`) matching the
- * icon footprint, containing a 3x3 mini-icon grid of real app icons with zero internal text.
- * Only the folder name is displayed below the squircle, plus the dynamic unread badge on the corner.
+ * Expanded 2x2 Home Screen Frosted Glass Folder Tile supporting both:
+ * 1) `FolderDisplayStyle.BENTO_2X2`: 3 large direct-launchable circular app icons (Top-Left, Top-Right, Bottom-Left)
+ *    + a 2x2 mini-grid in the Bottom-Right quadrant that opens the full folder modal when tapped.
+ * 2) `FolderDisplayStyle.DENSE_3X3`: Up to 8 medium direct-launchable circular app icons in slots 0..7
+ *    + a 2x2 mini-grid in the 9th (Bottom-Right) slot that opens the full folder modal when tapped.
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -590,6 +593,7 @@ fun LauncherFolderTile(
     iconSizeDp: Dp,
     iconScale: Float = 1.0f,
     showLabel: Boolean,
+    isExpanded2x2: Boolean = true,
     unreadNotificationCount: Int = 0,
     onLaunchApp: (AppInfo) -> Unit = {},
     onClick: () -> Unit,
@@ -598,21 +602,358 @@ fun LauncherFolderTile(
 ) {
     val haptics = LocalHapticFeedback.current
     val view = LocalView.current
-    val scaledSize = (iconSizeDp.value * iconScale.coerceIn(0.75f, 1.25f)).dp
-    val miniIconSize = (scaledSize.value * 0.235f).dp
-    val iosSquircleShape = RoundedCornerShape(percent = 26)
+    val folderShape = RoundedCornerShape(26.dp)
+    val style = folder.displayStyle
+
+    if (!isExpanded2x2) {
+        val scaledSize = (iconSizeDp.value * iconScale.coerceIn(0.75f, 1.25f)).dp
+        val miniIconSize = (scaledSize.value * 0.235f).dp
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+            modifier = modifier
+                .minimumInteractiveComponentSize()
+                .clip(RoundedCornerShape(16.dp))
+                .combinedClickable(
+                    onClick = {
+                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                        onClick()
+                    },
+                    onLongClick = {
+                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                        view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                        onLongClick()
+                    }
+                )
+                .padding(4.dp)
+                .testTag("folder_tile_${folder.id}")
+        ) {
+            Box(contentAlignment = Alignment.TopEnd) {
+                FrostedGlassBox(
+                    shape = RoundedCornerShape(percent = 26),
+                    alphaOverride = 0.42f,
+                    showBorder = false,
+                    modifier = Modifier.size(scaledSize)
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding((scaledSize.value * 0.11f).dp),
+                        verticalArrangement = Arrangement.SpaceBetween,
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        for (r in 0..2) {
+                            Row(
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                for (c in 0..2) {
+                                    val idx = r * 3 + c
+                                    IosFolderMiniIcon(
+                                        app = memberApps.getOrNull(idx),
+                                        size = miniIconSize,
+                                        showEmptyPlaceholder = false
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+                FolderUnreadBadge(folderId = folder.id, unreadNotificationCount = unreadNotificationCount)
+            }
+        }
+        return
+    }
 
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
         modifier = modifier
-            .minimumInteractiveComponentSize()
-            .clip(RoundedCornerShape(16.dp))
+            .fillMaxSize()
+            .padding(horizontal = 4.dp, vertical = 4.dp)
+            .testTag("folder_tile_${folder.id}")
+    ) {
+        Box(
+            contentAlignment = Alignment.TopEnd,
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
+        ) {
+            FrostedGlassBox(
+                shape = folderShape,
+                alphaOverride = 0.36f,
+                showBorder = false,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .combinedClickable(
+                        onClick = {
+                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                            onClick()
+                        },
+                        onLongClick = {
+                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                            view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                            onLongClick()
+                        }
+                    )
+            ) {
+                if (style == com.example.domain.model.FolderDisplayStyle.BENTO_2X2) {
+                    // Style 1: 2x2 Bento ("3 Large Circular Icons + Bottom-Right 2x2 Mini-Grid")
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(10.dp),
+                        verticalArrangement = Arrangement.SpaceEvenly,
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        // Top Row: Slot 0 (Top-Left) & Slot 1 (Top-Right)
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(1f),
+                            horizontalArrangement = Arrangement.SpaceEvenly,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                modifier = Modifier.weight(1f),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                FolderInteractiveAppIcon(
+                                    app = memberApps.getOrNull(0),
+                                    iconSize = 44.dp,
+                                    onLaunchApp = onLaunchApp,
+                                    onOpenFolder = onClick,
+                                    onLongClick = onLongClick
+                                )
+                            }
+                            Box(
+                                modifier = Modifier.weight(1f),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                FolderInteractiveAppIcon(
+                                    app = memberApps.getOrNull(1),
+                                    iconSize = 44.dp,
+                                    onLaunchApp = onLaunchApp,
+                                    onOpenFolder = onClick,
+                                    onLongClick = onLongClick
+                                )
+                            }
+                        }
+
+                        // Bottom Row: Slot 2 (Bottom-Left) & Bottom-Right 2x2 Mini-Grid
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(1f),
+                            horizontalArrangement = Arrangement.SpaceEvenly,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                modifier = Modifier.weight(1f),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                FolderInteractiveAppIcon(
+                                    app = memberApps.getOrNull(2),
+                                    iconSize = 44.dp,
+                                    onLaunchApp = onLaunchApp,
+                                    onOpenFolder = onClick,
+                                    onLongClick = onLongClick
+                                )
+                            }
+
+                            // Bottom-Right Quadrant: 2x2 Mini-Grid (Tapping opens full FolderDetailModal)
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .fillMaxSize()
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .combinedClickable(
+                                        onClick = {
+                                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                            view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                                            onClick()
+                                        },
+                                        onLongClick = {
+                                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                            view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                                            onLongClick()
+                                        }
+                                    )
+                                    .testTag("folder_mini_grid_${folder.id}"),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Column(
+                                    modifier = Modifier.size(42.dp),
+                                    verticalArrangement = Arrangement.SpaceBetween,
+                                    horizontalAlignment = Alignment.CenterHorizontally
+                                ) {
+                                    for (mr in 0..1) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            for (mc in 0..1) {
+                                                val appIdx = 3 + mr * 2 + mc
+                                                IosFolderMiniIcon(
+                                                    app = memberApps.getOrNull(appIdx),
+                                                    size = 18.dp,
+                                                    showEmptyPlaceholder = true
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    // Style 2: 3x3 Dense ("Up to 8 Medium Direct-Launch Icons + 9th Slot 2x2 Mini-Grid")
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(9.dp),
+                        verticalArrangement = Arrangement.SpaceEvenly,
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        for (r in 0..2) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .weight(1f),
+                                horizontalArrangement = Arrangement.SpaceEvenly,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                for (c in 0..2) {
+                                    val slotIdx = r * 3 + c
+                                    Box(
+                                        modifier = Modifier.weight(1f),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        if (slotIdx < 8) {
+                                            val app = memberApps.getOrNull(slotIdx)
+                                            if (app != null) {
+                                                FolderInteractiveAppIcon(
+                                                    app = app,
+                                                    iconSize = 30.dp,
+                                                    onLaunchApp = onLaunchApp,
+                                                    onOpenFolder = onClick,
+                                                    onLongClick = onLongClick
+                                                )
+                                            } else {
+                                                Spacer(modifier = Modifier.size(30.dp))
+                                            }
+                                        } else {
+                                            // 9th Slot (Bottom-Right): 2x2 Mini-Grid Cluster
+                                            val showCluster = memberApps.size > 8
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(30.dp)
+                                                    .clip(RoundedCornerShape(8.dp))
+                                                    .combinedClickable(
+                                                        onClick = {
+                                                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                                            view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                                                            onClick()
+                                                        },
+                                                        onLongClick = {
+                                                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                            view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                                                            onLongClick()
+                                                        }
+                                                    )
+                                                    .testTag("folder_mini_grid_${folder.id}"),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                if (showCluster) {
+                                                    Column(
+                                                        modifier = Modifier.size(28.dp),
+                                                        verticalArrangement = Arrangement.SpaceBetween,
+                                                        horizontalAlignment = Alignment.CenterHorizontally
+                                                    ) {
+                                                        for (mr in 0..1) {
+                                                            Row(
+                                                                modifier = Modifier.fillMaxWidth(),
+                                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                                verticalAlignment = Alignment.CenterVertically
+                                                            ) {
+                                                                for (mc in 0..1) {
+                                                                    val appIdx = 8 + mr * 2 + mc
+                                                                    IosFolderMiniIcon(
+                                                                        app = memberApps.getOrNull(appIdx),
+                                                                        size = 12.dp,
+                                                                        showEmptyPlaceholder = true
+                                                                    )
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            FolderUnreadBadge(folderId = folder.id, unreadNotificationCount = unreadNotificationCount)
+        }
+
+        if (showLabel) {
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(
+                text = folder.folderName,
+                style = MaterialTheme.typography.labelMedium,
+                color = Color.White,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                textAlign = TextAlign.Center
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun FolderInteractiveAppIcon(
+    app: AppInfo?,
+    iconSize: Dp,
+    onLaunchApp: (AppInfo) -> Unit,
+    onOpenFolder: () -> Unit,
+    onLongClick: () -> Unit
+) {
+    val haptics = LocalHapticFeedback.current
+    val view = LocalView.current
+
+    if (app == null) {
+        Box(
+            modifier = Modifier
+                .size(iconSize)
+                .clip(CircleShape)
+                .background(Color.White.copy(alpha = 0.14f))
+                .clickable { onOpenFolder() }
+        )
+        return
+    }
+
+    Surface(
+        shape = CircleShape,
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+        tonalElevation = 1.dp,
+        modifier = Modifier
+            .size(iconSize)
+            .clip(CircleShape)
             .combinedClickable(
                 onClick = {
                     haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                     view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
-                    onClick()
+                    onLaunchApp(app)
                 },
                 onLongClick = {
                     haptics.performHapticFeedback(HapticFeedbackType.LongPress)
@@ -620,79 +961,59 @@ fun LauncherFolderTile(
                     onLongClick()
                 }
             )
-            .padding(vertical = 4.dp, horizontal = 4.dp)
-            .testTag("folder_tile_${folder.id}")
     ) {
-        Box(contentAlignment = Alignment.TopEnd) {
-            FrostedGlassBox(
-                shape = iosSquircleShape,
-                alphaOverride = 0.44f,
-                showBorder = false,
-                modifier = Modifier.size(scaledSize)
+        if (app.appIcon != null) {
+            Image(
+                bitmap = app.appIcon,
+                contentDescription = app.appName,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clip(CircleShape)
+            )
+        } else {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(MaterialTheme.colorScheme.primaryContainer),
+                contentAlignment = Alignment.Center
             ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding((scaledSize.value * 0.11f).dp),
-                    verticalArrangement = Arrangement.SpaceBetween,
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    for (r in 0..2) {
-                        Row(
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            for (c in 0..2) {
-                                val idx = r * 3 + c
-                                val app = memberApps.getOrNull(idx)
-                                IosFolderMiniIcon(
-                                    app = app,
-                                    size = miniIconSize
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Dynamic Unread Count Number Badge on the Folder Corner (keeps user informed without opening folder)
-            if (unreadNotificationCount > 0) {
-                val badgeText = if (unreadNotificationCount > 99) "99+" else unreadNotificationCount.toString()
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .offset(x = 4.dp, y = (-4).dp)
-                        .widthIn(min = 19.dp)
-                        .height(19.dp)
-                        .clip(CircleShape)
-                        .background(MaterialTheme.colorScheme.primary)
-                        .padding(horizontal = 4.dp)
-                        .testTag("folder_badge_${folder.id}"),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = badgeText,
-                        style = MaterialTheme.typography.labelSmall.copy(
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold
-                        ),
-                        color = MaterialTheme.colorScheme.onPrimary
-                    )
-                }
+                Text(
+                    text = app.appName.take(1).uppercase(),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                    fontWeight = FontWeight.Bold
+                )
             }
         }
+    }
+}
 
-        if (showLabel) {
-            Spacer(modifier = Modifier.height(4.dp))
+@Composable
+private fun FolderUnreadBadge(
+    folderId: Long,
+    unreadNotificationCount: Int
+) {
+    if (unreadNotificationCount > 0) {
+        val badgeText = if (unreadNotificationCount > 99) "99+" else unreadNotificationCount.toString()
+        Box(
+            modifier = Modifier
+                .offset(x = 4.dp, y = (-4).dp)
+                .widthIn(min = 19.dp)
+                .height(19.dp)
+                .clip(CircleShape)
+                .background(MaterialTheme.colorScheme.primary)
+                .padding(horizontal = 4.dp)
+                .testTag("folder_badge_$folderId"),
+            contentAlignment = Alignment.Center
+        ) {
             Text(
-                text = folder.folderName,
-                style = MaterialTheme.typography.labelLarge,
-                color = Color.White,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.width(74.dp)
+                text = badgeText,
+                style = MaterialTheme.typography.labelSmall.copy(
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold
+                ),
+                color = MaterialTheme.colorScheme.onPrimary
             )
         }
     }
@@ -701,17 +1022,26 @@ fun LauncherFolderTile(
 @Composable
 private fun IosFolderMiniIcon(
     app: AppInfo?,
-    size: Dp
+    size: Dp,
+    showEmptyPlaceholder: Boolean = false
 ) {
-    val miniSquircle = RoundedCornerShape(percent = 26)
     if (app == null) {
-        Spacer(modifier = Modifier.size(size))
+        if (showEmptyPlaceholder) {
+            Box(
+                modifier = Modifier
+                    .size(size)
+                    .clip(RoundedCornerShape(percent = 28))
+                    .background(Color.White.copy(alpha = 0.18f))
+            )
+        } else {
+            Spacer(modifier = Modifier.size(size))
+        }
         return
     }
     Box(
         modifier = Modifier
             .size(size)
-            .clip(miniSquircle)
+            .clip(CircleShape)
             .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.52f)),
         contentAlignment = Alignment.Center
     ) {
@@ -722,7 +1052,7 @@ private fun IosFolderMiniIcon(
                 contentScale = ContentScale.Crop,
                 modifier = Modifier
                     .fillMaxSize()
-                    .clip(miniSquircle)
+                    .clip(CircleShape)
             )
         }
     }

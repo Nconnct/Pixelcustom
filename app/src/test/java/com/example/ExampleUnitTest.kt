@@ -200,4 +200,40 @@ class ExampleUnitTest {
         )
         assertTrue(socialFolderUnreadAfter < socialFolderUnread)
     }
+
+    @Test
+    fun `expanded 2x2 folders support both 2x2 Bento and 3x3 Dense display styles on 5-column grid`() {
+        val organizer = AiHomeOrganizer()
+        val sampleApps = listOf(
+            AppInfo("ChatGPT", "com.openai.chatgpt", categoryId = DefaultCategory.PRODUCTIVITY.id),
+            AppInfo("Gemini", "com.google.android.apps.bard", categoryId = DefaultCategory.PRODUCTIVITY.id),
+            AppInfo("Claude", "com.anthropic.claude", categoryId = DefaultCategory.PRODUCTIVITY.id),
+            AppInfo("Copilot", "com.microsoft.copilot", categoryId = DefaultCategory.PRODUCTIVITY.id),
+            AppInfo("SBI YONO", "com.sbi.lotusintouch", categoryId = DefaultCategory.BANKING.id),
+            AppInfo("Google Pay", "com.google.android.apps.nbu.paisa.user", categoryId = DefaultCategory.UPI_PAYMENTS.id),
+            AppInfo("Paytm", "net.one97.paytm", categoryId = DefaultCategory.UPI_PAYMENTS.id),
+            AppInfo("Instagram", "com.instagram.android", categoryId = DefaultCategory.SOCIAL.id),
+            AppInfo("Facebook", "com.facebook.katana", categoryId = DefaultCategory.SOCIAL.id),
+            AppInfo("Gmail", "com.google.android.gm", categoryId = DefaultCategory.INTERNET.id, isFavorite = true),
+            AppInfo("Brave", "com.brave.browser", categoryId = DefaultCategory.BROWSERS.id, isFavorite = true)
+        )
+
+        val preview = organizer.generateProposedLayout(
+            mode = ArrangementMode.AI_ORGANIZED,
+            installedApps = sampleApps,
+            existingItems = emptyList(),
+            existingFolders = emptyList(),
+            gridColumns = 5,
+            gridRows = 7,
+            dockCapacity = 4
+        )
+
+        val folderItemsOnPage0 = preview.proposedItems.filter { it.itemType == HomeItemType.FOLDER && it.pageIndex == 0 }
+        assertTrue(folderItemsOnPage0.isNotEmpty())
+        assertTrue(folderItemsOnPage0.all { it.spanX == 2 && it.spanY == 2 })
+
+        val styles = preview.proposedFolders.map { it.displayStyle }.toSet()
+        assertTrue(com.example.domain.model.FolderDisplayStyle.BENTO_2X2 in styles)
+        assertTrue(com.example.domain.model.FolderDisplayStyle.DENSE_3X3 in styles)
+    }
 }

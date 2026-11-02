@@ -110,6 +110,11 @@ data class HomeScreenItemModel(
     val isPinnedByUser: Boolean = false
 )
 
+enum class FolderDisplayStyle(val id: String, val displayName: String) {
+    BENTO_2X2("BENTO_2X2", "2×2 Bento"),
+    DENSE_3X3("DENSE_3X3", "3×3 Dense")
+}
+
 data class FolderModel(
     val id: Long = 0L,
     val folderName: String,
@@ -118,7 +123,18 @@ data class FolderModel(
     val column: Int = 0,
     val colorHex: String = "#4285F4",
     val memberPackages: List<String> = emptyList()
-)
+) {
+    val displayStyle: FolderDisplayStyle
+        get() = when {
+            colorHex.endsWith(":DENSE", ignoreCase = true) -> FolderDisplayStyle.DENSE_3X3
+            colorHex.endsWith(":BENTO", ignoreCase = true) -> FolderDisplayStyle.BENTO_2X2
+            memberPackages.size >= 7 -> FolderDisplayStyle.DENSE_3X3
+            else -> FolderDisplayStyle.BENTO_2X2
+        }
+
+    val cleanColorHex: String
+        get() = colorHex.substringBefore(":")
+}
 
 enum class ArrangementMode(val displayName: String, val description: String) {
     PIXEL_DEFAULT(

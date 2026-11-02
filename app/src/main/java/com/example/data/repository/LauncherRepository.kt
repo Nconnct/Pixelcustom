@@ -584,9 +584,14 @@ class LauncherRepository(
             }
         }
 
-        // Find next open cell on workspace
-        val occupied = items.filter { !it.isDockItem }.mapTo(mutableSetOf()) {
-            Triple(it.pageIndex, it.row, it.column)
+        // Find next open cell on workspace (respecting multi-span 2x2 folders & widgets)
+        val occupied = mutableSetOf<Triple<Int, Int, Int>>()
+        for (it in items.filter { !it.isDockItem }) {
+            for (r in it.row until (it.row + it.spanY.coerceAtLeast(1))) {
+                for (c in it.column until (it.column + it.spanX.coerceAtLeast(1))) {
+                    occupied.add(Triple(it.pageIndex, r, c))
+                }
+            }
         }
         var targetCell = Triple(0, 1, 0)
         outer@ for (p in 0 until maxOf(3, settings.homePageCount)) {
@@ -607,6 +612,8 @@ class LauncherRepository(
                 pageIndex = targetCell.first,
                 row = targetCell.second,
                 column = targetCell.third,
+                spanX = 1,
+                spanY = 1,
                 isDockItem = false,
                 itemType = HomeItemType.APP_SHORTCUT.name,
                 packageName = packageName,
@@ -623,36 +630,281 @@ class LauncherRepository(
         targetColumn: Int,
         toDock: Boolean = false
     ) = withContext(Dispatchers.IO) {
+        val settings = dao.getSettingsSnapshot() ?: LauncherSettingsEntity()
+        val cols = settings.homeGridColumns.coerceIn(3, 6)
+        val rows = settings.homeGridRows.coerceIn(4, 7)
         val items = dao.getHomeItemsSnapshot()
         val moving = items.firstOrNull { it.id == itemId } ?: return@withContext
-        val occupant = items.firstOrNull {
-            it.id != itemId && it.isDockItem == toDock &&
-                (if (toDock) it.dockIndex == targetColumn else (it.pageIndex == targetPage && it.row == targetRow && it.column == targetColumn))
-        }
 
-        // If dropping an app shortcut onto another app shortcut, offer/create a folder or swap positions
-        if (occupant != null) {
+        if (toDock) {
+            // Only 1x1 app shortcuts can move into the dock
+            if (moving.itemType == HomeItemType.FOLDER.name) return@withContext
+            val clampedDockSlot = targetColumn.coerceIn(0, settings.dockIconCount - 1)
+            val occupant = items.firstOrNull {
+                it.id != itemId && it.isDockItem && it.dockIndex == clampedDockSlot
+            }
+            if (occupant != null) {
+                dao.updateHomeItem(
+                    occupant.copy(
+                        pageIndex = moving.pageIndex,
+                        row = moving.row,
+                        column = moving.column,
+                        isDockItem = moving.isDockItem,
+                        dockIndex = moving.dockIndex
+                    )
+                )
+            }
             dao.updateHomeItem(
-                occupant.copy(
-                    pageIndex = moving.pageIndex,
-                    row = moving.row,
-                    column = moving.column,
-                    isDockItem = moving.isDockItem,
-                    dockIndex = moving.dockIndex
+                moving.copy(
+                    pageIndex = 0,
+                    row = rows - 1,
+                    column = clampedDockSlot,
+                    spanX = 1,
+                    spanY = 1,
+                    isDockItem = true,
+                    dockIndex = clampedDockSlot,
+                    isPinnedByUser = true
                 )
             )
+            return@withContext
+        }
+
+        val startRow = if (targetPage == 0 && settings.showAtAGlanceWidget) 1 else 0
+        val effSpanX = moving.spanX.coerceIn(1, cols)
+        val effSpanY = moving.spanY.coerceIn(1, (rows - startRow).coerceAtLeast(1))
+        val clampedCol = targetColumn.coerceIn(0, (cols - effSpanX).coerceAtLeast(0))
+        val clampedRow = targetRow.coerceIn(startRow, (rows - effSpanY).coerceAtLeast(startRow))
+
+        val targetCells = mutableSetOf<Pair<Int, Int>>()
+        for (r in clampedRow until (clampedRow + effSpanY)) {
+            for (c in clampedCol until (clampedCol + effSpanX)) {
+                targetCells.add(r to c)
+            }
+        }
+
+        val otherPageItems = items.filter { it.id != itemId && !it.isDockItem && it.pageIndex == targetPage }
+        val overlappingItems = otherPageItems.filter { item ->
+            var overlaps = false
+            for (r in item.row until (item.row + item.spanY.coerceAtLeast(1))) {
+                for (c in item.column until (item.column + item.spanX.coerceAtLeast(1))) {
+                    if ((r to c) in targetCells) {
+                        overlaps = true
+                    }
+                }
+            }
+            overlaps
+        }
+
+        // Build set of occupied cells on targetPage after placing `moving` at (clampedRow, clampedCol)
+        val occupiedCells = mutableSetOf<Pair<Int, Int>>()
+        occupiedCells.addAll(targetCells)
+        for (nonOverlapping in otherPageItems.filter { it !in overlappingItems }) {
+            for (r in nonOverlapping.row until (nonOverlapping.row + nonOverlapping.spanY.coerceAtLeast(1))) {
+                for (c in nonOverlapping.column until (nonOverlapping.column + nonOverlapping.spanX.coerceAtLeast(1))) {
+                    occupiedCells.add(r to c)
+                }
+            }
+        }
+
+        // Relocate any overlapping items to the moving item's old position (if on same page and fits) or nearest free block
+        for ((idx, displaced) in overlappingItems.withIndex()) {
+            if (idx == 0 && moving.isDockItem && displaced.spanX == 1 && displaced.spanY == 1) {
+                dao.updateHomeItem(
+                    displaced.copy(
+                        pageIndex = 0,
+                        row = rows - 1,
+                        column = moving.dockIndex,
+                        isDockItem = true,
+                        dockIndex = moving.dockIndex
+                    )
+                )
+                continue
+            }
+
+            val dSpanX = displaced.spanX.coerceIn(1, cols)
+            val dSpanY = displaced.spanY.coerceIn(1, (rows - startRow).coerceAtLeast(1))
+
+            // Candidate positions: first try the moving item's old (row, col) if on the same page, then scan the page
+            val candidateOrigins = mutableListOf<Pair<Int, Int>>()
+            if (!moving.isDockItem && moving.pageIndex == targetPage) {
+                val oldR = moving.row.coerceIn(startRow, (rows - dSpanY).coerceAtLeast(startRow))
+                val oldC = moving.column.coerceIn(0, (cols - dSpanX).coerceAtLeast(0))
+                candidateOrigins.add(oldR to oldC)
+            }
+            for (r in startRow..(rows - dSpanY).coerceAtLeast(startRow)) {
+                for (c in 0..(cols - dSpanX).coerceAtLeast(0)) {
+                    candidateOrigins.add(r to c)
+                }
+            }
+
+            var placedOrigin: Pair<Int, Int>? = null
+            for ((candR, candC) in candidateOrigins) {
+                var fits = true
+                for (rr in candR until (candR + dSpanY)) {
+                    for (cc in candC until (candC + dSpanX)) {
+                        if ((rr to cc) in occupiedCells) {
+                            fits = false
+                            break
+                        }
+                    }
+                    if (!fits) break
+                }
+                if (fits) {
+                    placedOrigin = candR to candC
+                    for (rr in candR until (candR + dSpanY)) {
+                        for (cc in candC until (candC + dSpanX)) {
+                            occupiedCells.add(rr to cc)
+                        }
+                    }
+                    break
+                }
+            }
+
+            val finalR = placedOrigin?.first ?: displaced.row
+            val finalC = placedOrigin?.second ?: displaced.column
+            dao.updateHomeItem(
+                displaced.copy(
+                    pageIndex = targetPage,
+                    row = finalR,
+                    column = finalC,
+                    isDockItem = false,
+                    dockIndex = 0
+                )
+            )
+            if (displaced.folderId != null) {
+                val folder = dao.getFoldersSnapshot().firstOrNull { it.id == displaced.folderId }
+                if (folder != null) {
+                    dao.insertFolder(folder.copy(pageIndex = targetPage, row = finalR, column = finalC))
+                }
+            }
         }
 
         dao.updateHomeItem(
             moving.copy(
                 pageIndex = targetPage,
-                row = targetRow,
-                column = targetColumn,
-                isDockItem = toDock,
-                dockIndex = if (toDock) targetColumn else 0,
+                row = clampedRow,
+                column = clampedCol,
+                spanX = effSpanX,
+                spanY = effSpanY,
+                isDockItem = false,
+                dockIndex = 0,
                 isPinnedByUser = true
             )
         )
+        if (moving.folderId != null) {
+            val folder = dao.getFoldersSnapshot().firstOrNull { it.id == moving.folderId }
+            if (folder != null) {
+                dao.insertFolder(folder.copy(pageIndex = targetPage, row = clampedRow, column = clampedCol))
+            }
+        }
+    }
+
+    /**
+     * Merges a dragged app shortcut onto another app shortcut (creating a new 2x2 folder)
+     * or adds a dragged app shortcut into an existing folder.
+     */
+    suspend fun mergeHomeItemsIntoFolder(
+        draggedItemId: Long,
+        targetItemId: Long
+    ): String? = withContext(Dispatchers.IO) {
+        if (draggedItemId == targetItemId) return@withContext null
+        val settings = dao.getSettingsSnapshot() ?: LauncherSettingsEntity()
+        val cols = settings.homeGridColumns.coerceIn(3, 6)
+        val rows = settings.homeGridRows.coerceIn(4, 7)
+        val items = dao.getHomeItemsSnapshot()
+        val folders = dao.getFoldersSnapshot()
+
+        val dragged = items.firstOrNull { it.id == draggedItemId } ?: return@withContext null
+        val target = items.firstOrNull { it.id == targetItemId } ?: return@withContext null
+
+        val draggedPkg = dragged.packageName ?: return@withContext null
+
+        // Case 1: Dropping an App Shortcut onto an existing Folder
+        if (target.itemType == HomeItemType.FOLDER.name && target.folderId != null) {
+            val existingFolder = folders.firstOrNull { it.id == target.folderId } ?: return@withContext null
+            val currentMembers = existingFolder.memberPackagesCsv
+                .split(",")
+                .map { it.trim() }
+                .filter { it.isNotEmpty() }
+            val updatedMembers = (currentMembers + draggedPkg).distinct()
+            val updatedColorHex = if (updatedMembers.size >= 8 && !existingFolder.colorHex.contains(":")) {
+                "${existingFolder.colorHex}:DENSE"
+            } else {
+                existingFolder.colorHex
+            }
+            dao.insertFolder(
+                existingFolder.copy(
+                    colorHex = updatedColorHex,
+                    memberPackagesCsv = updatedMembers.joinToString(",")
+                )
+            )
+            dao.deleteHomeItemById(dragged.id)
+            return@withContext existingFolder.folderName
+        }
+
+        // Case 2: Dropping an App Shortcut onto another App Shortcut -> Create new 2x2 Folder
+        if (target.itemType == HomeItemType.APP_SHORTCUT.name && !target.isDockItem) {
+            val targetPkg = target.packageName ?: return@withContext null
+            if (targetPkg == draggedPkg) return@withContext null
+
+            val targetApp = dao.getAppByPackage(targetPkg)
+            val catEntity = targetApp?.let { app ->
+                dao.getCategoriesSnapshot().firstOrNull { it.id == app.primaryCategoryId }
+            }
+            val newFolderName = catEntity?.name?.takeIf {
+                it != DefaultCategory.UNCATEGORIZED.displayName && it != DefaultCategory.ALL_APPS.displayName
+            } ?: "Smart Folder"
+
+            val startRow = if (target.pageIndex == 0 && settings.showAtAGlanceWidget) 1 else 0
+            val folderRow = target.row.coerceIn(startRow, (rows - 2).coerceAtLeast(startRow))
+            val folderCol = target.column.coerceIn(0, (cols - 2).coerceAtLeast(0))
+
+            dao.deleteHomeItemById(dragged.id)
+            dao.deleteHomeItemById(target.id)
+
+            val folderId = dao.insertFolder(
+                FolderEntity(
+                    folderName = newFolderName,
+                    pageIndex = target.pageIndex,
+                    row = folderRow,
+                    column = folderCol,
+                    colorHex = "#3B82F6:BENTO",
+                    memberPackagesCsv = listOf(targetPkg, draggedPkg).distinct().joinToString(",")
+                )
+            )
+            val insertedItemId = dao.insertHomeItem(
+                HomeScreenItemEntity(
+                    pageIndex = target.pageIndex,
+                    row = folderRow,
+                    column = folderCol,
+                    spanX = 2,
+                    spanY = 2,
+                    isDockItem = false,
+                    itemType = HomeItemType.FOLDER.name,
+                    customLabel = newFolderName,
+                    folderId = folderId,
+                    isPinnedByUser = true
+                )
+            )
+            // Ensure any items overlapped by the new 2x2 folder footprint are shifted to free cells
+            moveHomeItemToCell(insertedItemId, target.pageIndex, folderRow, folderCol, toDock = false)
+            return@withContext newFolderName
+        }
+
+        null
+    }
+
+    suspend fun toggleFolderDisplayStyle(folderId: Long): String? = withContext(Dispatchers.IO) {
+        val existing = dao.getFoldersSnapshot().firstOrNull { it.id == folderId } ?: return@withContext null
+        val domain = existing.toDomainModel()
+        val nextSuffix = if (domain.displayStyle == com.example.domain.model.FolderDisplayStyle.BENTO_2X2) {
+            "DENSE"
+        } else {
+            "BENTO"
+        }
+        val updatedColorHex = "${domain.cleanColorHex}:$nextSuffix"
+        dao.insertFolder(existing.copy(colorHex = updatedColorHex))
+        if (nextSuffix == "DENSE") "3×3 Dense" else "2×2 Bento"
     }
 
     suspend fun createFolderOnHome(
@@ -662,31 +914,46 @@ class LauncherRepository(
         pageIndex: Int = 0
     ) = withContext(Dispatchers.IO) {
         val settings = dao.getSettingsSnapshot() ?: LauncherSettingsEntity()
+        val cols = settings.homeGridColumns.coerceIn(3, 6)
+        val rows = settings.homeGridRows.coerceIn(4, 7)
         val items = dao.getHomeItemsSnapshot()
-        val occupied = items.filter { !it.isDockItem }.mapTo(mutableSetOf()) {
-            Triple(it.pageIndex, it.row, it.column)
+        val occupied = mutableSetOf<Triple<Int, Int, Int>>()
+        for (it in items.filter { !it.isDockItem }) {
+            for (r in it.row until (it.row + it.spanY.coerceAtLeast(1))) {
+                for (c in it.column until (it.column + it.spanX.coerceAtLeast(1))) {
+                    occupied.add(Triple(it.pageIndex, r, c))
+                }
+            }
         }
-        var cell = Triple(pageIndex, 1, 0)
+
+        var cell = Triple(pageIndex, 1, 1.coerceAtMost(cols - 2))
         outer@ for (p in pageIndex until maxOf(3, settings.homePageCount)) {
             val startRow = if (p == 0 && settings.showAtAGlanceWidget) 1 else 0
-            for (r in startRow until settings.homeGridRows) {
-                for (c in 0 until settings.homeGridColumns) {
-                    val candidate = Triple(p, r, c)
-                    if (candidate !in occupied) {
-                        cell = candidate
+            for (r in startRow..(rows - 2).coerceAtLeast(startRow)) {
+                for (c in 0..(cols - 2).coerceAtLeast(0)) {
+                    val block = listOf(
+                        Triple(p, r, c),
+                        Triple(p, r, c + 1),
+                        Triple(p, r + 1, c),
+                        Triple(p, r + 1, c + 1)
+                    )
+                    if (block.none { it in occupied }) {
+                        cell = Triple(p, r, c)
                         break@outer
                     }
                 }
             }
         }
 
+        val cleanColor = colorHex.substringBefore(":")
+        val styleSuffix = if (memberPackages.size >= 8) "DENSE" else "BENTO"
         val folderId = dao.insertFolder(
             FolderEntity(
                 folderName = folderName.ifBlank { "Smart Folder" },
                 pageIndex = cell.first,
                 row = cell.second,
                 column = cell.third,
-                colorHex = colorHex,
+                colorHex = "$cleanColor:$styleSuffix",
                 memberPackagesCsv = memberPackages.distinct().joinToString(",")
             )
         )
@@ -695,6 +962,8 @@ class LauncherRepository(
                 pageIndex = cell.first,
                 row = cell.second,
                 column = cell.third,
+                spanX = 2,
+                spanY = 2,
                 isDockItem = false,
                 itemType = HomeItemType.FOLDER.name,
                 customLabel = folderName.ifBlank { "Smart Folder" },

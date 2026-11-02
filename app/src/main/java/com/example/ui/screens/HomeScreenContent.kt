@@ -6,12 +6,15 @@ import android.provider.Settings
 import android.view.HapticFeedbackConstants
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -23,6 +26,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
@@ -42,6 +46,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CreateNewFolder
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.OpenWith
@@ -61,17 +66,24 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -79,7 +91,9 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import com.example.domain.model.AppInfo
@@ -99,7 +113,16 @@ import com.example.ui.components.PixelBottomSearchBar
 import com.example.ui.viewmodel.ActiveOverlaySheet
 import com.example.ui.viewmodel.LauncherUiState
 import kotlin.math.abs
+import kotlin.math.roundToInt
 import kotlinx.coroutines.launch
+
+private data class PlacedGridItem(
+    val item: HomeScreenItemModel,
+    val displayRow: Int,
+    val col: Int,
+    val spanX: Int,
+    val spanY: Int
+)
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -115,6 +138,8 @@ fun HomeScreenContent(
     onOpenAppContextMenu: (AppInfo, HomeScreenItemModel?) -> Unit,
     onRemoveHomeItem: (Long) -> Unit,
     onMoveHomeItem: (Long, Int, Int, Int, Boolean) -> Unit,
+    onMergeHomeItems: (Long, Long) -> Unit = { _, _ -> },
+    onToggleFolderStyle: (Long) -> Unit = {},
     onCreateSmartFolder: (String, List<String>, String, Int) -> Unit,
     onUpdateFolder: (Long, String, List<String>) -> Unit,
     onDeleteFolder: (Long) -> Unit,
@@ -135,9 +160,23 @@ fun HomeScreenContent(
 
     val verticalSwipeThresholdPx = remember(density) { with(density) { 42.dp.toPx() } }
     val axisLockSlopPx = remember(density) { with(density) { 14.dp.toPx() } }
+    val dragMoveThresholdPx = remember(density) { with(density) { 10.dp.toPx() } }
+    val edgeScrollZonePx = remember(density) { with(density) { 36.dp.toPx() } }
 
     var showHomeLongPressDialog by remember { mutableStateOf(false) }
     var showCreateFolderDialog by remember { mutableStateOf(false) }
+
+    // Hold-and-Swipe Real-Time Drag State
+    var rootBoundsInRoot by remember { mutableStateOf(Rect.Zero) }
+    var activeGridBoundsInRoot by remember { mutableStateOf(Rect.Zero) }
+    var dockBoundsInRoot by remember { mutableStateOf(Rect.Zero) }
+    var draggedItem by remember { mutableStateOf<HomeScreenItemModel?>(null) }
+    var dragFingerInRoot by remember { mutableStateOf(Offset.Zero) }
+    var dragTotalDistance by remember { mutableStateOf(0f) }
+    var hoverGridCell by remember { mutableStateOf<Pair<Int, Int>?>(null) }
+    var hoverDockSlot by remember { mutableStateOf<Int?>(null) }
+    var mergeTargetItem by remember { mutableStateOf<HomeScreenItemModel?>(null) }
+    var lastEdgePageTurnMs by remember { mutableLongStateOf(0L) }
 
     val appsByPkg = remember(state.installedApps) {
         state.installedApps.associateBy { it.packageName }
@@ -153,18 +192,23 @@ fun HomeScreenContent(
         state.installedApps.count { it.categoryId != DefaultCategory.UNCATEGORIZED.id }
     }
 
+    val gridCols = settings.homeGridColumns.coerceIn(3, 6)
+    val totalGridRows = settings.homeGridRows.coerceIn(4, 7)
+
     Box(
         modifier = modifier
             .fillMaxSize()
             .windowInsetsPadding(WindowInsets.safeDrawing)
+            .onGloballyPositioned { rootBoundsInRoot = it.boundsInRoot() }
             .pointerInput(
                 settings.swipeUpAction,
                 settings.swipeDownAction,
                 state.openedFolder,
                 showHomeLongPressDialog,
-                showCreateFolderDialog
+                showCreateFolderDialog,
+                draggedItem
             ) {
-                if (state.openedFolder != null || showHomeLongPressDialog || showCreateFolderDialog) {
+                if (state.openedFolder != null || showHomeLongPressDialog || showCreateFolderDialog || draggedItem != null) {
                     return@pointerInput
                 }
                 awaitEachGesture {
@@ -180,6 +224,7 @@ fun HomeScreenContent(
                             ?: event.changes.firstOrNull()
                             ?: break
                         if (!change.pressed) break
+                        if (draggedItem != null) break
 
                         val dx = change.position.x - change.previousPosition.x
                         val dy = change.position.y - change.previousPosition.y
@@ -196,14 +241,12 @@ fun HomeScreenContent(
                                 haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                 view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
                                 if (totalDy < 0f) {
-                                    // Swipe Up -> Open App Drawer (default)
                                     when (settings.swipeUpAction) {
                                         "OPEN_SEARCH" -> onOpenOverlay(ActiveOverlaySheet.UNIFIED_SEARCH)
                                         "AI_ORGANIZE_PREVIEW" -> onOpenOverlay(ActiveOverlaySheet.AI_ORGANIZER_PREVIEW)
                                         else -> onOpenOverlay(ActiveOverlaySheet.APP_DRAWER)
                                     }
                                 } else {
-                                    // Swipe Down -> Open Unified Search (default)
                                     when (settings.swipeDownAction) {
                                         "OPEN_DRAWER" -> onOpenOverlay(ActiveOverlaySheet.APP_DRAWER)
                                         else -> onOpenOverlay(ActiveOverlaySheet.UNIFIED_SEARCH)
@@ -216,7 +259,8 @@ fun HomeScreenContent(
                     }
                 }
             }
-            .pointerInput(Unit) {
+            .pointerInput(draggedItem) {
+                if (draggedItem != null) return@pointerInput
                 detectTapGestures(
                     onLongPress = {
                         haptics.performHapticFeedback(HapticFeedbackType.LongPress)
@@ -244,10 +288,45 @@ fun HomeScreenContent(
                 )
             }
 
-            // Active Move Mode Banner
-            if (movingHomeItem != null) {
+            // Active Drag / Move Mode Banner
+            val activeDragged = draggedItem
+            if (activeDragged != null) {
+                FrostedGlassBox(
+                    shape = RoundedCornerShape(18.dp),
+                    alphaOverride = 0.56f,
+                    showBorder = false,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 2.dp)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        val hintText = when {
+                            mergeTargetItem != null -> {
+                                val targetLabel = mergeTargetItem?.customLabel ?: "Folder"
+                                "Release to merge into '$targetLabel'"
+                            }
+                            hoverDockSlot != null -> "Release to place in Dock slot ${(hoverDockSlot ?: 0) + 1}"
+                            hoverGridCell != null -> "Release to place on Page ${pagerState.currentPage + 1}"
+                            else -> "Hold & swipe to move, swap, or drop on an icon to merge"
+                        }
+                        Text(
+                            text = hintText,
+                            style = MaterialTheme.typography.labelLarge,
+                            color = Color.White,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                }
+            } else if (movingHomeItem != null) {
                 FrostedGlassBox(
                     shape = RoundedCornerShape(16.dp),
+                    showBorder = false,
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 16.dp, vertical = 4.dp)
@@ -272,9 +351,10 @@ fun HomeScreenContent(
                 }
             }
 
-            // 2. 3-Page Horizontal Home Screen Workspace Grid (Page 1: Smart Folders, Pages 2 & 3: Extra Apps)
+            // 2. 3-Page Horizontal Home Screen Workspace Grid (5-Column Multi-Span Layout with 2x2 Folders & 1x1 Apps)
             HorizontalPager(
                 state = pagerState,
+                userScrollEnabled = draggedItem == null,
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth()
@@ -285,14 +365,13 @@ fun HomeScreenContent(
                 }
 
                 // Fallback extra apps for Pages 2 and 3 if database hasn't populated them yet
-                val effectivePageItems = remember(rawPageItems, state.installedApps, state.homeItems, pageIndex, settings.homeGridColumns) {
+                val effectivePageItems = remember(rawPageItems, state.installedApps, state.homeItems, pageIndex, gridCols) {
                     if (rawPageItems.isNotEmpty() || pageIndex == 0 || state.installedApps.isEmpty()) {
                         rawPageItems
                     } else {
                         val dockPkgs = state.homeItems.filter { it.isDockItem }.mapNotNullTo(mutableSetOf()) { it.packageName }
                         val candidateApps = state.installedApps.filter { it.packageName !in dockPkgs }
-                        val cols = settings.homeGridColumns.coerceIn(3, 6)
-                        val perPage = cols * 2
+                        val perPage = gridCols * 2
                         val slice = if (pageIndex == 1) {
                             candidateApps.take(perPage)
                         } else {
@@ -302,8 +381,10 @@ fun HomeScreenContent(
                             HomeScreenItemModel(
                                 id = -1000L - (pageIndex * 100L + idx),
                                 pageIndex = pageIndex,
-                                row = idx / cols,
-                                column = idx % cols,
+                                row = idx / gridCols,
+                                column = idx % gridCols,
+                                spanX = 1,
+                                spanY = 1,
                                 isDockItem = false,
                                 itemType = HomeItemType.APP_SHORTCUT,
                                 packageName = app.packageName,
@@ -319,36 +400,78 @@ fun HomeScreenContent(
                 val nonWidgetItems = remember(effectivePageItems) {
                     effectivePageItems
                         .filter { it.itemType != HomeItemType.WIDGET }
-                        .sortedWith(compareBy<HomeScreenItemModel> { it.row }.thenBy { it.column })
+                        .sortedWith(
+                            compareByDescending<HomeScreenItemModel> { it.spanX * it.spanY }
+                                .thenBy { it.row }
+                                .thenBy { it.column }
+                        )
                 }
 
-                val gridCols = settings.homeGridColumns.coerceIn(3, 6)
-                val totalGridRows = settings.homeGridRows.coerceIn(4, 7)
                 val startRow = if (pageIndex == 0 && settings.showAtAGlanceWidget) 1 else 0
-                val displayRows = (totalGridRows - startRow).coerceAtLeast(3)
+                val displayRows = (totalGridRows - startRow).coerceAtLeast(4)
 
-                // Deterministically map every non-widget item to a unique (row, col) cell on this page
-                val cellItemMap = remember(nonWidgetItems, displayRows, gridCols, startRow) {
-                    val map = mutableMapOf<Pair<Int, Int>, HomeScreenItemModel>()
+                // Deterministically place multi-span (2x2 folders) and 1x1 app shortcuts on this page without overlap
+                val placedPageItems = remember(nonWidgetItems, displayRows, gridCols, startRow) {
+                    val occupied = Array(displayRows) { BooleanArray(gridCols) }
+                    val placed = mutableListOf<PlacedGridItem>()
                     val unplaced = mutableListOf<HomeScreenItemModel>()
+
+                    fun canFit(r: Int, c: Int, sx: Int, sy: Int): Boolean {
+                        if (r < 0 || c < 0 || r + sy > displayRows || c + sx > gridCols) return false
+                        for (rr in r until (r + sy)) {
+                            for (cc in c until (c + sx)) {
+                                if (occupied[rr][cc]) return false
+                            }
+                        }
+                        return true
+                    }
+
+                    fun markOccupied(r: Int, c: Int, sx: Int, sy: Int) {
+                        for (rr in r until (r + sy)) {
+                            for (cc in c until (c + sx)) {
+                                occupied[rr][cc] = true
+                            }
+                        }
+                    }
+
                     for (item in nonWidgetItems) {
-                        val adjRow = (item.row - startRow).coerceIn(0, displayRows - 1)
-                        val adjCol = item.column.coerceIn(0, gridCols - 1)
-                        val key = adjRow to adjCol
-                        if (key !in map) {
-                            map[key] = item
+                        val isFolder = item.itemType == HomeItemType.FOLDER
+                        val sx = if (isFolder) item.spanX.coerceAtLeast(2).coerceAtMost(gridCols) else 1
+                        val sy = if (isFolder) item.spanY.coerceAtLeast(2).coerceAtMost(displayRows) else 1
+                        val desiredR = (item.row - startRow).coerceIn(0, (displayRows - sy).coerceAtLeast(0))
+                        val desiredC = item.column.coerceIn(0, (gridCols - sx).coerceAtLeast(0))
+                        if (canFit(desiredR, desiredC, sx, sy)) {
+                            markOccupied(desiredR, desiredC, sx, sy)
+                            placed.add(PlacedGridItem(item, desiredR, desiredC, sx, sy))
                         } else {
                             unplaced.add(item)
                         }
                     }
+
                     for (item in unplaced) {
-                        outer@ for (r in 0 until displayRows) {
-                            for (c in 0 until gridCols) {
-                                val key = r to c
-                                if (key !in map) {
-                                    map[key] = item
+                        val isFolder = item.itemType == HomeItemType.FOLDER
+                        val sx = if (isFolder) item.spanX.coerceAtLeast(2).coerceAtMost(gridCols) else 1
+                        val sy = if (isFolder) item.spanY.coerceAtLeast(2).coerceAtMost(displayRows) else 1
+                        outer@ for (r in 0..(displayRows - sy).coerceAtLeast(0)) {
+                            for (c in 0..(gridCols - sx).coerceAtLeast(0)) {
+                                if (canFit(r, c, sx, sy)) {
+                                    markOccupied(r, c, sx, sy)
+                                    placed.add(PlacedGridItem(item, r, c, sx, sy))
                                     break@outer
                                 }
+                            }
+                        }
+                    }
+                    placed
+                }
+
+                // Lookup map from any (displayRow, col) cell to the PlacedGridItem covering it
+                val cellToPlacedItem = remember(placedPageItems) {
+                    val map = mutableMapOf<Pair<Int, Int>, PlacedGridItem>()
+                    for (p in placedPageItems) {
+                        for (rr in p.displayRow until (p.displayRow + p.spanY)) {
+                            for (cc in p.col until (p.col + p.spanX)) {
+                                map[rr to cc] = p
                             }
                         }
                     }
@@ -358,7 +481,7 @@ fun HomeScreenContent(
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(horizontal = 12.dp, vertical = 4.dp)
+                        .padding(horizontal = 10.dp, vertical = 2.dp)
                         .testTag("home_page_$pageIndex"),
                     verticalArrangement = Arrangement.SpaceBetween
                 ) {
@@ -368,7 +491,7 @@ fun HomeScreenContent(
                             alphaOverride = 0.65f,
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(96.dp)
+                                .height(92.dp)
                                 .padding(vertical = 4.dp)
                                 .testTag("home_widget_${widgetItem.id}")
                         ) {
@@ -425,105 +548,318 @@ fun HomeScreenContent(
                         }
                     }
 
-                    // Structured Uniform Grid (Rows x Columns) — Circular Frosted Folders & App Icons
-                    for (r in 0 until displayRows) {
-                        val dbRow = r + startRow
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .weight(1f),
-                            horizontalArrangement = Arrangement.SpaceEvenly,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            for (c in 0 until gridCols) {
-                                val cellItem = cellItemMap[r to c]
-                                Box(
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .fillMaxSize()
-                                        .padding(2.dp)
-                                        .then(
-                                            if (movingHomeItem != null) {
-                                                Modifier
-                                                    .clip(RoundedCornerShape(14.dp))
-                                                    .background(
-                                                        MaterialTheme.colorScheme.primary.copy(alpha = 0.20f)
-                                                    )
-                                                    .clickable {
-                                                        onMoveHomeItem(movingHomeItem.id, pageIndex, dbRow, c, false)
-                                                        onCancelMoveMode()
-                                                    }
-                                            } else {
-                                                Modifier
-                                            }
-                                        ),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    when (cellItem?.itemType) {
-                                        HomeItemType.FOLDER -> {
-                                            val folder = cellItem.folderId?.let { foldersById[it] }
-                                            if (folder != null) {
-                                                val memberApps = folder.memberPackages.mapNotNull { appsByPkg[it] }
-                                                val folderUnreadCount = LauncherNotificationListenerService.computeFolderUnreadCount(
-                                                    memberPackages = folder.memberPackages,
-                                                    countsByPackage = state.notificationCounts
-                                                )
-                                                LauncherFolderTile(
-                                                    folder = folder,
-                                                    memberApps = memberApps,
-                                                    iconSizeDp = settings.homeIconSizeDp.dp,
-                                                    iconScale = settings.iconScale,
-                                                    showLabel = settings.showHomeIconLabels,
-                                                    unreadNotificationCount = folderUnreadCount,
-                                                    onClick = {
-                                                        if (movingHomeItem != null) {
-                                                            onMoveHomeItem(movingHomeItem.id, pageIndex, dbRow, c, false)
-                                                            onCancelMoveMode()
-                                                        } else {
-                                                            onOpenFolder(folder.id)
-                                                        }
-                                                    },
-                                                    onLongClick = {
-                                                        if (movingHomeItem == null) {
-                                                            onOpenFolder(folder.id)
-                                                        }
-                                                    },
-                                                    onLaunchApp = onLaunchApp
-                                                )
-                                            }
-                                        }
+                    // Multi-Span 2D Workspace Grid (Supports 1x1 Apps and 2x2 Expanded Folders + Real-Time Drag & Drop)
+                    BoxWithConstraints(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth()
+                            .onGloballyPositioned { coords ->
+                                if (pagerState.currentPage == pageIndex) {
+                                    activeGridBoundsInRoot = coords.boundsInRoot()
+                                }
+                            }
+                    ) {
+                        val cellWidth = maxWidth / gridCols
+                        val cellHeight = maxHeight / displayRows
 
-                                        HomeItemType.APP_SHORTCUT -> {
-                                            val app = cellItem.packageName?.let { appsByPkg[it] }
-                                            if (app != null) {
-                                                val appUnread = state.notificationCounts[app.packageName] ?: 0
-                                                LauncherAppTile(
-                                                    app = app,
-                                                    iconSizeDp = settings.homeIconSizeDp.dp,
-                                                    iconScale = settings.iconScale,
-                                                    iconShape = iconShape,
-                                                    showLabel = settings.showHomeIconLabels,
-                                                    notificationCount = appUnread,
-                                                    labelColor = Color.White,
-                                                    onClick = {
-                                                        if (movingHomeItem != null) {
-                                                            onMoveHomeItem(movingHomeItem.id, pageIndex, dbRow, c, false)
-                                                            onCancelMoveMode()
-                                                        } else {
-                                                            onLaunchApp(app)
-                                                        }
-                                                    },
-                                                    onLongClick = {
-                                                        if (movingHomeItem == null) {
-                                                            onOpenAppContextMenu(app, cellItem)
-                                                        }
-                                                    }
-                                                )
+                        // 1. Render subtle drop target slots when movingHomeItem != null or when dragging
+                        if (movingHomeItem != null) {
+                            for (r in 0 until displayRows) {
+                                for (c in 0 until gridCols) {
+                                    val dbRow = r + startRow
+                                    Box(
+                                        modifier = Modifier
+                                            .offset(x = cellWidth * c, y = cellHeight * r)
+                                            .size(width = cellWidth, height = cellHeight)
+                                            .padding(3.dp)
+                                            .clip(RoundedCornerShape(16.dp))
+                                            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.18f))
+                                            .clickable {
+                                                onMoveHomeItem(movingHomeItem.id, pageIndex, dbRow, c, false)
+                                                onCancelMoveMode()
                                             }
-                                        }
+                                    )
+                                }
+                            }
+                        }
 
-                                        else -> Unit
+                        // Highlight hovered cell/footprint during active hold-and-swipe drag on current page
+                        val currentHoverCell = hoverGridCell
+                        if (draggedItem != null && pagerState.currentPage == pageIndex && currentHoverCell != null && mergeTargetItem == null) {
+                            val isDraggedFolder = draggedItem?.itemType == HomeItemType.FOLDER
+                            val dragSpanX = if (isDraggedFolder) 2 else 1
+                            val dragSpanY = if (isDraggedFolder) 2 else 1
+                            val clampedR = currentHoverCell.first.coerceIn(0, (displayRows - dragSpanY).coerceAtLeast(0))
+                            val clampedC = currentHoverCell.second.coerceIn(0, (gridCols - dragSpanX).coerceAtLeast(0))
+                            Box(
+                                modifier = Modifier
+                                    .offset(x = cellWidth * clampedC, y = cellHeight * clampedR)
+                                    .size(width = cellWidth * dragSpanX, height = cellHeight * dragSpanY)
+                                    .padding(4.dp)
+                                    .clip(RoundedCornerShape(if (isDraggedFolder) 26.dp else 18.dp))
+                                    .background(Color.White.copy(alpha = 0.22f))
+                                    .border(
+                                        width = 1.5.dp,
+                                        color = Color.White.copy(alpha = 0.65f),
+                                        shape = RoundedCornerShape(if (isDraggedFolder) 26.dp else 18.dp)
+                                    )
+                            )
+                        }
+
+                        // 2. Render each PlacedGridItem (1x1 App or 2x2 Expanded Folder)
+                        for (placed in placedPageItems) {
+                            val cellItem = placed.item
+                            val dbRow = placed.displayRow + startRow
+                            val isBeingDragged = draggedItem?.id == cellItem.id && dragTotalDistance > dragMoveThresholdPx
+                            val isMergeTarget = mergeTargetItem?.id == cellItem.id
+                            var itemBoundsInRoot by remember(cellItem.id) { mutableStateOf(Rect.Zero) }
+
+                            Box(
+                                modifier = Modifier
+                                    .offset(x = cellWidth * placed.col, y = cellHeight * placed.displayRow)
+                                    .size(width = cellWidth * placed.spanX, height = cellHeight * placed.spanY)
+                                    .alpha(if (isBeingDragged) 0.28f else 1f)
+                                    .scale(if (isMergeTarget) 1.07f else 1f)
+                                    .then(
+                                        if (isMergeTarget) {
+                                            Modifier
+                                                .padding(2.dp)
+                                                .clip(RoundedCornerShape(26.dp))
+                                                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.32f))
+                                                .border(
+                                                    width = 2.dp,
+                                                    color = Color.White.copy(alpha = 0.85f),
+                                                    shape = RoundedCornerShape(26.dp)
+                                                )
+                                        } else {
+                                            Modifier
+                                        }
+                                    )
+                                    .onGloballyPositioned { coords ->
+                                        itemBoundsInRoot = coords.boundsInRoot()
                                     }
+                                    .pointerInput(cellItem.id, pageIndex, displayRows, gridCols) {
+                                        detectDragGesturesAfterLongPress(
+                                            onDragStart = { startOffset ->
+                                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                                                draggedItem = cellItem
+                                                dragTotalDistance = 0f
+                                                dragFingerInRoot = itemBoundsInRoot.topLeft + startOffset
+                                                hoverGridCell = placed.displayRow to placed.col
+                                                hoverDockSlot = null
+                                                mergeTargetItem = null
+                                            },
+                                            onDrag = { change, dragAmount ->
+                                                change.consume()
+                                                dragFingerInRoot += dragAmount
+                                                dragTotalDistance += dragAmount.getDistance()
+
+                                                // Auto-scroll pager when dragging near left/right screen edges
+                                                val now = System.currentTimeMillis()
+                                                if (now - lastEdgePageTurnMs > 550L && rootBoundsInRoot.width > 0f) {
+                                                    if (dragFingerInRoot.x - rootBoundsInRoot.left < edgeScrollZonePx && pagerState.currentPage > 0) {
+                                                        lastEdgePageTurnMs = now
+                                                        coroutineScope.launch {
+                                                            pagerState.animateScrollToPage(pagerState.currentPage - 1)
+                                                        }
+                                                    } else if (rootBoundsInRoot.right - dragFingerInRoot.x < edgeScrollZonePx && pagerState.currentPage < pageCount - 1) {
+                                                        lastEdgePageTurnMs = now
+                                                        coroutineScope.launch {
+                                                            pagerState.animateScrollToPage(pagerState.currentPage + 1)
+                                                        }
+                                                    }
+                                                }
+
+                                                // Check if finger is over the Dock
+                                                if (
+                                                    settings.showDock &&
+                                                    cellItem.itemType == HomeItemType.APP_SHORTCUT &&
+                                                    dockBoundsInRoot.width > 0f &&
+                                                    dragFingerInRoot.y >= dockBoundsInRoot.top
+                                                ) {
+                                                    val relX = (dragFingerInRoot.x - dockBoundsInRoot.left)
+                                                        .coerceIn(0f, dockBoundsInRoot.width - 1f)
+                                                    val slot = ((relX / dockBoundsInRoot.width) * settings.dockIconCount)
+                                                        .toInt()
+                                                        .coerceIn(0, settings.dockIconCount - 1)
+                                                    hoverDockSlot = slot
+                                                    hoverGridCell = null
+                                                    mergeTargetItem = null
+                                                } else if (activeGridBoundsInRoot.width > 0f && activeGridBoundsInRoot.height > 0f) {
+                                                    hoverDockSlot = null
+                                                    val relX = (dragFingerInRoot.x - activeGridBoundsInRoot.left)
+                                                        .coerceIn(0f, activeGridBoundsInRoot.width - 1f)
+                                                    val relY = (dragFingerInRoot.y - activeGridBoundsInRoot.top)
+                                                        .coerceIn(0f, activeGridBoundsInRoot.height - 1f)
+                                                    val cWidthPx = activeGridBoundsInRoot.width / gridCols
+                                                    val cHeightPx = activeGridBoundsInRoot.height / displayRows
+                                                    val targetC = (relX / cWidthPx).toInt().coerceIn(0, gridCols - 1)
+                                                    val targetR = (relY / cHeightPx).toInt().coerceIn(0, displayRows - 1)
+                                                    hoverGridCell = targetR to targetC
+
+                                                    // Check if hovering over another item to merge into a folder
+                                                    val occupant = cellToPlacedItem[targetR to targetC]
+                                                    if (
+                                                        cellItem.itemType == HomeItemType.APP_SHORTCUT &&
+                                                        occupant != null &&
+                                                        occupant.item.id != cellItem.id &&
+                                                        occupant.item.id > 0L
+                                                    ) {
+                                                        val occLeft = occupant.col * cWidthPx
+                                                        val occTop = occupant.displayRow * cHeightPx
+                                                        val occWidth = occupant.spanX * cWidthPx
+                                                        val occHeight = occupant.spanY * cHeightPx
+                                                        val normX = (relX - occLeft) / occWidth
+                                                        val normY = (relY - occTop) / occHeight
+                                                        if (normX in 0.18f..0.82f && normY in 0.18f..0.82f) {
+                                                            mergeTargetItem = occupant.item
+                                                        } else {
+                                                            mergeTargetItem = null
+                                                        }
+                                                    } else {
+                                                        mergeTargetItem = null
+                                                    }
+                                                }
+                                            },
+                                            onDragEnd = {
+                                                val currentDragged = draggedItem
+                                                val movedDistance = dragTotalDistance
+                                                val targetMerge = mergeTargetItem
+                                                val targetDock = hoverDockSlot
+                                                val targetCell = hoverGridCell
+
+                                                draggedItem = null
+                                                dragTotalDistance = 0f
+                                                hoverGridCell = null
+                                                hoverDockSlot = null
+                                                mergeTargetItem = null
+
+                                                if (currentDragged == null) return@detectDragGesturesAfterLongPress
+
+                                                if (movedDistance <= dragMoveThresholdPx) {
+                                                    // Stationary long-press -> open context menu or folder modal
+                                                    when (currentDragged.itemType) {
+                                                        HomeItemType.APP_SHORTCUT -> {
+                                                            val app = currentDragged.packageName?.let { appsByPkg[it] }
+                                                            if (app != null) {
+                                                                onOpenAppContextMenu(app, currentDragged)
+                                                            }
+                                                        }
+                                                        HomeItemType.FOLDER -> {
+                                                            val fId = currentDragged.folderId
+                                                            if (fId != null) {
+                                                                onOpenFolder(fId)
+                                                            }
+                                                        }
+                                                        else -> Unit
+                                                    }
+                                                } else if (currentDragged.id > 0L) {
+                                                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                                    view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                                                    val destPage = pagerState.currentPage
+                                                    val destStartRow = if (destPage == 0 && settings.showAtAGlanceWidget) 1 else 0
+                                                    when {
+                                                        targetMerge != null && targetMerge.id > 0L -> {
+                                                            onMergeHomeItems(currentDragged.id, targetMerge.id)
+                                                        }
+                                                        targetDock != null -> {
+                                                            onMoveHomeItem(
+                                                                currentDragged.id,
+                                                                0,
+                                                                settings.homeGridRows - 1,
+                                                                targetDock,
+                                                                true
+                                                            )
+                                                        }
+                                                        targetCell != null -> {
+                                                            onMoveHomeItem(
+                                                                currentDragged.id,
+                                                                destPage,
+                                                                targetCell.first + destStartRow,
+                                                                targetCell.second,
+                                                                false
+                                                            )
+                                                        }
+                                                    }
+                                                }
+                                            },
+                                            onDragCancel = {
+                                                draggedItem = null
+                                                dragTotalDistance = 0f
+                                                hoverGridCell = null
+                                                hoverDockSlot = null
+                                                mergeTargetItem = null
+                                            }
+                                        )
+                                    },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                when (cellItem.itemType) {
+                                    HomeItemType.FOLDER -> {
+                                        val folder = cellItem.folderId?.let { foldersById[it] }
+                                        if (folder != null) {
+                                            val memberApps = folder.memberPackages.mapNotNull { appsByPkg[it] }
+                                            val folderUnreadCount = LauncherNotificationListenerService.computeFolderUnreadCount(
+                                                memberPackages = folder.memberPackages,
+                                                countsByPackage = state.notificationCounts
+                                            )
+                                            LauncherFolderTile(
+                                                folder = folder,
+                                                memberApps = memberApps,
+                                                iconSizeDp = settings.homeIconSizeDp.dp,
+                                                iconScale = settings.iconScale,
+                                                showLabel = settings.showHomeIconLabels,
+                                                isExpanded2x2 = placed.spanX >= 2 && placed.spanY >= 2,
+                                                unreadNotificationCount = folderUnreadCount,
+                                                onClick = {
+                                                    if (movingHomeItem != null) {
+                                                        onMoveHomeItem(movingHomeItem.id, pageIndex, dbRow, placed.col, false)
+                                                        onCancelMoveMode()
+                                                    } else {
+                                                        onOpenFolder(folder.id)
+                                                    }
+                                                },
+                                                onLongClick = {
+                                                    if (movingHomeItem == null && draggedItem == null) {
+                                                        onOpenFolder(folder.id)
+                                                    }
+                                                },
+                                                onLaunchApp = onLaunchApp
+                                            )
+                                        }
+                                    }
+
+                                    HomeItemType.APP_SHORTCUT -> {
+                                        val app = cellItem.packageName?.let { appsByPkg[it] }
+                                        if (app != null) {
+                                            val appUnread = state.notificationCounts[app.packageName] ?: 0
+                                            LauncherAppTile(
+                                                app = app,
+                                                iconSizeDp = settings.homeIconSizeDp.dp,
+                                                iconScale = settings.iconScale,
+                                                iconShape = iconShape,
+                                                showLabel = settings.showHomeIconLabels,
+                                                notificationCount = appUnread,
+                                                labelColor = Color.White,
+                                                onClick = {
+                                                    if (movingHomeItem != null) {
+                                                        onMoveHomeItem(movingHomeItem.id, pageIndex, dbRow, placed.col, false)
+                                                        onCancelMoveMode()
+                                                    } else {
+                                                        onLaunchApp(app)
+                                                    }
+                                                },
+                                                onLongClick = {
+                                                    if (movingHomeItem == null && draggedItem == null) {
+                                                        onOpenAppContextMenu(app, cellItem)
+                                                    }
+                                                }
+                                            )
+                                        }
+                                    }
+
+                                    else -> Unit
                                 }
                             }
                         }
@@ -535,7 +871,7 @@ fun HomeScreenContent(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(vertical = 4.dp)
+                    .padding(vertical = 2.dp)
                     .testTag("home_page_indicator"),
                 contentAlignment = Alignment.Center
             ) {
@@ -546,7 +882,7 @@ fun HomeScreenContent(
                     modifier = Modifier.padding(horizontal = 8.dp)
                 ) {
                     Row(
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp),
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
                         horizontalArrangement = Arrangement.Center,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
@@ -555,7 +891,7 @@ fun HomeScreenContent(
                             Box(
                                 modifier = Modifier
                                     .padding(horizontal = 4.dp)
-                                    .size(width = if (isSelected) 20.dp else 7.dp, height = 7.dp)
+                                    .size(width = if (isSelected) 18.dp else 6.dp, height = 6.dp)
                                     .clip(CircleShape)
                                     .background(
                                         if (isSelected) Color.White else Color.White.copy(alpha = 0.38f)
@@ -572,7 +908,17 @@ fun HomeScreenContent(
                 }
             }
 
-            // 4. Pinned Borderless Frosted Glass Dock (seamless soft glass surface above the bottom search bar)
+            // 4. Compact Centered Frosted Glass Search Pill (matching screenshot above dock)
+            if (settings.showBottomSearchBar) {
+                PixelBottomSearchBar(
+                    onSearchBarClick = { onOpenOverlay(ActiveOverlaySheet.UNIFIED_SEARCH) },
+                    onOpenDrawerClick = { onOpenOverlay(ActiveOverlaySheet.APP_DRAWER) },
+                    onOpenAiOrganizerClick = { onOpenOverlay(ActiveOverlaySheet.AI_ORGANIZER_PREVIEW) },
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                )
+            }
+
+            // 5. Pinned Borderless Frosted Glass Dock
             if (settings.showDock) {
                 val dockItems = remember(state.homeItems) {
                     state.homeItems.filter { it.isDockItem }.sortedBy { it.dockIndex }
@@ -588,14 +934,15 @@ fun HomeScreenContent(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 16.dp, vertical = 4.dp)
-                        .heightIn(min = 74.dp)
+                        .heightIn(min = 72.dp)
+                        .onGloballyPositioned { dockBoundsInRoot = it.boundsInRoot() }
                         .testTag("home_frosted_dock")
                 ) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .heightIn(min = 74.dp)
-                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                            .heightIn(min = 72.dp)
+                            .padding(horizontal = 12.dp, vertical = 6.dp),
                         horizontalArrangement = Arrangement.SpaceEvenly,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
@@ -604,31 +951,130 @@ fun HomeScreenContent(
                                 ?: dockItems.getOrNull(dockSlot)
                             val dockApp = dockItem?.packageName?.let { appsByPkg[it] }
                                 ?: fallbackDockApps.getOrNull(dockSlot)
+                            val isHoveredDockSlot = hoverDockSlot == dockSlot && draggedItem != null
+                            var dockSlotBoundsInRoot by remember(dockSlot) { mutableStateOf(Rect.Zero) }
 
                             Box(
                                 modifier = Modifier
                                     .weight(1f)
+                                    .onGloballyPositioned { dockSlotBoundsInRoot = it.boundsInRoot() }
                                     .then(
-                                        if (movingHomeItem != null) {
+                                        if (movingHomeItem != null || isHoveredDockSlot) {
                                             Modifier
-                                                .clip(RoundedCornerShape(14.dp))
+                                                .clip(RoundedCornerShape(16.dp))
                                                 .background(
-                                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.20f)
-                                                )
-                                                .clickable {
-                                                    onMoveHomeItem(
-                                                        movingHomeItem.id,
-                                                        0,
-                                                        settings.homeGridRows - 1,
-                                                        dockSlot,
-                                                        true
+                                                    MaterialTheme.colorScheme.primary.copy(
+                                                        alpha = if (isHoveredDockSlot) 0.32f else 0.20f
                                                     )
-                                                    onCancelMoveMode()
+                                                )
+                                                .clickable(enabled = movingHomeItem != null) {
+                                                    if (movingHomeItem != null) {
+                                                        onMoveHomeItem(
+                                                            movingHomeItem.id,
+                                                            0,
+                                                            settings.homeGridRows - 1,
+                                                            dockSlot,
+                                                            true
+                                                        )
+                                                        onCancelMoveMode()
+                                                    }
                                                 }
                                         } else {
                                             Modifier
                                         }
-                                    ),
+                                    )
+                                    .pointerInput(dockItem?.id ?: (-dockSlot.toLong())) {
+                                        if (dockItem == null) return@pointerInput
+                                        detectDragGesturesAfterLongPress(
+                                            onDragStart = { startOffset ->
+                                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                                                draggedItem = dockItem
+                                                dragTotalDistance = 0f
+                                                dragFingerInRoot = dockSlotBoundsInRoot.topLeft + startOffset
+                                                hoverDockSlot = dockSlot
+                                                hoverGridCell = null
+                                                mergeTargetItem = null
+                                            },
+                                            onDrag = { change, dragAmount ->
+                                                change.consume()
+                                                dragFingerInRoot += dragAmount
+                                                dragTotalDistance += dragAmount.getDistance()
+                                                if (dockBoundsInRoot.width > 0f && dragFingerInRoot.y >= dockBoundsInRoot.top) {
+                                                    val relX = (dragFingerInRoot.x - dockBoundsInRoot.left)
+                                                        .coerceIn(0f, dockBoundsInRoot.width - 1f)
+                                                    hoverDockSlot = ((relX / dockBoundsInRoot.width) * settings.dockIconCount)
+                                                        .toInt()
+                                                        .coerceIn(0, settings.dockIconCount - 1)
+                                                    hoverGridCell = null
+                                                } else if (activeGridBoundsInRoot.width > 0f && activeGridBoundsInRoot.height > 0f) {
+                                                    hoverDockSlot = null
+                                                    val startRow = if (pagerState.currentPage == 0 && settings.showAtAGlanceWidget) 1 else 0
+                                                    val displayRows = (totalGridRows - startRow).coerceAtLeast(4)
+                                                    val relX = (dragFingerInRoot.x - activeGridBoundsInRoot.left)
+                                                        .coerceIn(0f, activeGridBoundsInRoot.width - 1f)
+                                                    val relY = (dragFingerInRoot.y - activeGridBoundsInRoot.top)
+                                                        .coerceIn(0f, activeGridBoundsInRoot.height - 1f)
+                                                    val targetC = ((relX / activeGridBoundsInRoot.width) * gridCols)
+                                                        .toInt()
+                                                        .coerceIn(0, gridCols - 1)
+                                                    val targetR = ((relY / activeGridBoundsInRoot.height) * displayRows)
+                                                        .toInt()
+                                                        .coerceIn(0, displayRows - 1)
+                                                    hoverGridCell = targetR to targetC
+                                                }
+                                            },
+                                            onDragEnd = {
+                                                val currentDragged = draggedItem
+                                                val movedDistance = dragTotalDistance
+                                                val targetDock = hoverDockSlot
+                                                val targetCell = hoverGridCell
+
+                                                draggedItem = null
+                                                dragTotalDistance = 0f
+                                                hoverGridCell = null
+                                                hoverDockSlot = null
+                                                mergeTargetItem = null
+
+                                                if (currentDragged == null) return@detectDragGesturesAfterLongPress
+                                                if (movedDistance <= dragMoveThresholdPx) {
+                                                    if (dockApp != null) {
+                                                        onOpenAppContextMenu(dockApp, currentDragged)
+                                                    }
+                                                } else {
+                                                    val destPage = pagerState.currentPage
+                                                    val destStartRow = if (destPage == 0 && settings.showAtAGlanceWidget) 1 else 0
+                                                    when {
+                                                        targetDock != null -> {
+                                                            onMoveHomeItem(
+                                                                currentDragged.id,
+                                                                0,
+                                                                settings.homeGridRows - 1,
+                                                                targetDock,
+                                                                true
+                                                            )
+                                                        }
+                                                        targetCell != null -> {
+                                                            onMoveHomeItem(
+                                                                currentDragged.id,
+                                                                destPage,
+                                                                targetCell.first + destStartRow,
+                                                                targetCell.second,
+                                                                false
+                                                            )
+                                                        }
+                                                    }
+                                                }
+                                            },
+                                            onDragCancel = {
+                                                draggedItem = null
+                                                dragTotalDistance = 0f
+                                                hoverGridCell = null
+                                                hoverDockSlot = null
+                                                mergeTargetItem = null
+                                            }
+                                        )
+                                    },
                                 contentAlignment = Alignment.Center
                             ) {
                                 if (dockApp != null) {
@@ -655,7 +1101,9 @@ fun HomeScreenContent(
                                             }
                                         },
                                         onLongClick = {
-                                            onOpenAppContextMenu(dockApp, dockItem)
+                                            if (draggedItem == null) {
+                                                onOpenAppContextMenu(dockApp, dockItem)
+                                            }
                                         }
                                     )
                                 } else {
@@ -675,15 +1123,56 @@ fun HomeScreenContent(
                     }
                 }
             }
+        }
 
-            // 5. Bottom Pixel Search Bar
-            if (settings.showBottomSearchBar) {
-                PixelBottomSearchBar(
-                    onSearchBarClick = { onOpenOverlay(ActiveOverlaySheet.UNIFIED_SEARCH) },
-                    onOpenDrawerClick = { onOpenOverlay(ActiveOverlaySheet.APP_DRAWER) },
-                    onOpenAiOrganizerClick = { onOpenOverlay(ActiveOverlaySheet.AI_ORGANIZER_PREVIEW) },
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
-                )
+        // --- Floating Drag Preview Under User's Finger ---
+        val floatingDragged = draggedItem
+        if (floatingDragged != null && dragTotalDistance > dragMoveThresholdPx) {
+            val previewSizeDp = if (floatingDragged.itemType == HomeItemType.FOLDER) 118.dp else 64.dp
+            val previewHalfPx = with(density) { (previewSizeDp / 2).toPx() }
+            val localX = (dragFingerInRoot.x - rootBoundsInRoot.left - previewHalfPx).roundToInt()
+            val localY = (dragFingerInRoot.y - rootBoundsInRoot.top - previewHalfPx).roundToInt()
+
+            Box(
+                modifier = Modifier
+                    .offset { IntOffset(localX, localY) }
+                    .size(previewSizeDp)
+                    .scale(1.08f)
+                    .alpha(0.92f)
+            ) {
+                when (floatingDragged.itemType) {
+                    HomeItemType.FOLDER -> {
+                        val folder = floatingDragged.folderId?.let { foldersById[it] }
+                        if (folder != null) {
+                            val memberApps = folder.memberPackages.mapNotNull { appsByPkg[it] }
+                            LauncherFolderTile(
+                                folder = folder,
+                                memberApps = memberApps,
+                                iconSizeDp = settings.homeIconSizeDp.dp,
+                                iconScale = settings.iconScale,
+                                showLabel = false,
+                                isExpanded2x2 = true,
+                                onClick = {},
+                                onLongClick = {}
+                            )
+                        }
+                    }
+                    HomeItemType.APP_SHORTCUT -> {
+                        val app = floatingDragged.packageName?.let { appsByPkg[it] }
+                        if (app != null) {
+                            LauncherAppTile(
+                                app = app,
+                                iconSizeDp = settings.homeIconSizeDp.dp,
+                                iconScale = settings.iconScale,
+                                iconShape = iconShape,
+                                showLabel = false,
+                                onClick = {},
+                                onLongClick = {}
+                            )
+                        }
+                    }
+                    else -> Unit
+                }
             }
         }
 
@@ -700,6 +1189,7 @@ fun HomeScreenContent(
                     onCloseFolder()
                     onLaunchApp(app)
                 },
+                onToggleFolderStyle = { onToggleFolderStyle(activeFolder.id) },
                 onUpdateFolder = onUpdateFolder,
                 onDeleteFolder = onDeleteFolder
             )
@@ -766,7 +1256,7 @@ fun HomeScreenContent(
                         ) {
                             Icon(Icons.Default.CreateNewFolder, contentDescription = null)
                             Spacer(Modifier.width(8.dp))
-                            Text("Create iOS Smart Folder")
+                            Text("Create 2×2 Smart Folder")
                         }
                         FilledTonalButton(
                             onClick = {
@@ -830,6 +1320,7 @@ private fun FolderDetailModal(
     iconShape: IconShapeOption,
     onDismiss: () -> Unit,
     onLaunchApp: (AppInfo) -> Unit,
+    onToggleFolderStyle: () -> Unit = {},
     onUpdateFolder: (Long, String, List<String>) -> Unit,
     onDeleteFolder: (Long) -> Unit
 ) {
@@ -852,7 +1343,7 @@ private fun FolderDetailModal(
                 .padding(horizontal = 12.dp)
                 .testTag("folder_detail_modal")
         ) {
-            // iOS Style Centered Folder Title Above/At Top of Folder (Only Folder Name Text Stays)
+            // iOS Style Centered Folder Title Above/At Top of Folder + Style Switcher Pill
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -888,7 +1379,7 @@ private fun FolderDetailModal(
                         style = MaterialTheme.typography.headlineSmall,
                         fontWeight = FontWeight.Bold,
                         color = Color.White,
-                        textAlign = TextAlign.Center,
+                        textAlign = TextAlign.Start,
                         modifier = Modifier.weight(1f)
                     )
                 }
@@ -897,6 +1388,36 @@ private fun FolderDetailModal(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
+                    // Toggle between 2x2 Bento and 3x3 Dense Home Screen Folder Display Style
+                    FrostedGlassBox(
+                        shape = CircleShape,
+                        alphaOverride = 0.46f,
+                        showBorder = false,
+                        modifier = Modifier
+                            .height(36.dp)
+                            .clickable { onToggleFolderStyle() }
+                            .testTag("toggle_folder_style_button")
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.GridView,
+                                contentDescription = "Switch Folder Grid Style",
+                                tint = Color.White,
+                                modifier = Modifier.size(15.dp)
+                            )
+                            Text(
+                                text = folder.displayStyle.displayName,
+                                style = MaterialTheme.typography.labelMedium.copy(fontSize = 11.sp),
+                                color = Color.White,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
+
                     FrostedGlassBox(
                         shape = CircleShape,
                         alphaOverride = 0.46f,

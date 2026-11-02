@@ -1,6 +1,6 @@
 {
-  "summary": "Implementation plan for borderless frosted glass UI across the entire launcher (matching the 4-app home dock) and authentic iOS-style folders with all internal text removed except the folder title.",
-  "updatedAt": "2026-11-02T18:32:27.859191656Z",
+  "summary": "Implementation plan for Xiaomi/iOS-style expanded 2x2 Home Screen folders (supporting both 2x2 Bento and 3x3 Dense layouts), direct app launch with mini-grid folder expansion, 5-column label-free Home Screen layout matching the reference screenshot, and real-time hold-and-swipe drag-and-drop with free placement, position swapping, and drop-to-merge folder creation.",
+  "updatedAt": "2026-11-02T19:09:02.875466310Z",
   "requestFeedback": true,
   "userFacing": true
 }

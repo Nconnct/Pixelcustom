@@ -1,91 +1,56 @@
-# Borderless Frosted Glass UI & Authentic iOS Folders
+# Expanded 2×2 Bento/3×3 Folders & Real-Time Hold-and-Swipe Drag-and-Drop Plan
 
-Deliver a seamless, borderless frosted glass aesthetic across all search bars, buttons, inputs, and sheets—matching the 4-app Home Screen dock—while redesigning folders to an authentic iOS squircle and popup layout where only the folder title text is displayed.
+## 1. Visual & Functional Goals (Matching Your Reference Screenshot)
 
-## User Review & Critical Decisions
+1. **5-Column Label-Free Home Screen Layout (`5 × 7` Grid)**
+   - Update the default Home Screen grid to **5 columns** and **7 rows** with **app/folder text labels hidden (`showHomeIconLabels = false`)** so the Home Screen replicates the clean, label-free layout in your screenshot:
+     - **Left column (`col = 0`)**: Single 1×1 circular app shortcuts stacked vertically.
+     - **Middle & Right columns (`cols 1..2` and `cols 3..4`)**: Pairs of expanded **2×2 frosted glass folders** (`spanX = 2, spanY = 2`) side-by-side, plus additional 1×1 app icons below them.
+     - **Compact Frosted Search Pill**: Centered `Search` pill above the borderless bottom dock.
 
-> [!IMPORTANT]
-> Both design questions were confirmed during interactive clarification and are incorporated into this plan:
+2. **Expanded 2×2 Home Screen Folders (`2×2 Bento` & `3×3 Dense` Modes)**
+   - Upgrade `LauncherFolderTile` in `FrostedGlassComponents.kt` to render as a borderless frosted glass card (`RoundedCornerShape(26.dp)`) spanning **2×2 grid cells** (`spanX = 2, spanY = 2`) with zero text labels:
+     - **2×2 Bento Style ("3 Large + 2×2 Mini Grid")**:
+       - Used for folders with up to 7 apps (or when toggled to `2x2 Bento` in the folder popup):
+       - **Top-Left, Top-Right, Bottom-Left quadrants**: 3 full-size circular app icons that launch the respective app **directly on tap**.
+       - **Bottom-Right quadrant**: A **2×2 mini-grid** showing up to 4 mini app icons and subtle translucent rounded-square placeholders (`Color.White.copy(alpha = 0.22f)`) for remaining empty slots, exactly as shown in your screenshot. Tapping the bottom-right mini-grid opens the full `FolderDetailModal`.
+     - **3×3 Dense Style ("8 Medium + 2×2 Mini Grid")**:
+       - Used automatically for larger folders (8+ apps) or when toggled to `3x3 Dense` in the folder popup:
+       - **First 8 slots (`0..7`) of the 3×3 grid**: Medium circular app icons that launch the respective app **directly on tap**.
+       - **9th slot (bottom-right)**: A **2×2 mini-cluster** of 4 tiny app icons that opens the full `FolderDetailModal` when tapped.
+     - **Folder Style Switcher**: Inside `FolderDetailModal`, add a quick pill toggle (`Auto` / `2×2 Bento` / `3×3 Dense`) so you can also switch any individual folder's display mode at any time.
 
-- **Confirmed Decision 1 — Zero Internal Text in Folders (Only Folder Title Stays)**: Both the Home Screen folder preview and the opened iOS Folder popup will hide all internal app labels, category subtitles, and button text labels so only the folder name is shown.
-- **Confirmed Decision 2 — Launcher-Wide Borderless Frosted Glass**: The borderless soft frosted glass treatment used on the 4-app Home Screen dock will be applied globally across the bottom search bar, buttons, chips, text inputs, modals, App Drawer, Unified Search, Glass Browser, and Settings sheets.
-
----
-
-## 1. Overview & Core Concept
-
-- **What It Does**: Eliminates all 1dp outlines, strokes, and borders from buttons, search bars, chips, and glass cards throughout the launcher, replacing them with soft, borderless multi-layer frosted glass surfaces. Transforms folders into authentic iOS frosted squircles (3×3 mini-icon grid) and iOS-style opened folder popups containing only the folder title and app icons.
-- **Target Audience / Persona**: Users who want a clean, ultra-modern iOS + Pixel glassmorphic home screen free of visual clutter, hairline borders, or redundant text inside folders.
-- **Key Value**: Creates visual harmony between the 4-app dock, bottom search bar, action buttons, and folders while making folders cleaner and faster to scan at a glance.
-
----
-
-## 2. User Experience & Visual Design
-
-- **Key User Flows**:
-  1. **Home Screen & Search Bar**: The bottom search pill, header AI/Settings buttons, page indicator pill, and folder tiles float over the live wallpaper using soft translucent glass without any white or dark border lines.
-  2. **iOS Folder Tile on Home Screen**: Each folder on Page 1 renders as a borderless frosted glass iOS squircle (`RoundedCornerShape(percent = 26)`) housing up to 9 mini app icons in a crisp 3×3 grid, with only the folder name below the squircle and the dynamic unread count badge on the top-right corner.
-  3. **Opening an iOS Folder**: Tapping a folder opens a centered, borderless frosted glass iOS folder card (`RoundedCornerShape(38.dp)`). Only the folder name is displayed at the top; inside the folder surface, app icons are arranged in a clean 3-column iOS grid with all app text labels, tier subtitles, and button text labels removed (using subtle icon-only controls for adding apps or deleting the folder).
-  4. **All Launcher Sheets & Buttons**: Opening the App Drawer, Unified Search, In-Launcher Glass Browser, AI Arrange sheet, or Long-Press menus displays borderless frosted search bars, borderless tonal glass buttons, and borderless filter chips.
-
-- **Visual Identity & Theme**:
-  - *Aesthetic Direction*: Pure Borderless Glassmorphism (iOS Vision/iOS 18 + Pixel Frosted Glass).
-  - *Color Palette & Mood*: Translucent surface layers (`frostedSurfaceAlpha` with soft vertical luminance gradients and top specular sheen) over the system wallpaper, completely free of `1.dp` border strokes (`showBorder = false`).
-  - *Typography & Hierarchy*: Inside folders, visual hierarchy is simplified to a single bold centered folder header (`titleLarge`), letting app iconography speak for itself without truncated sub-labels.
-  - *Component Styling & Layout*:
-    - Replace all `OutlinedButton` instances with borderless translucent glass buttons (`FilledTonalButton` / `FrostedGlassBox` with zero border).
-    - Configure all `OutlinedTextField` search and form inputs with `Color.Transparent` focused and unfocused borders over a frosted pill background.
-    - Configure all `FilterChip` components with `border = null`.
+3. **Real-Time Hold-and-Swipe Drag-and-Drop (`pointerInput` Gesture)**
+   - Replace the static two-step move dialog with interactive **touch-hold-and-swipe dragging** directly on the Home Screen:
+     - **Hold & Lift**: Long-pressing any app icon or 2×2 folder triggers haptic feedback and lifts a floating drag preview that tracks your finger smoothly across the screen.
+     - **Quick Action Pill While Holding**: If you long-press and release without dragging, show the context menu / folder modal; as soon as your finger moves past touch slop, enter live drag mode with a highlighted drop target cell (or 2×2 footprint for folders) on the grid or dock.
+     - **Edge Page Auto-Scroll**: Holding a dragged item near the left or right screen edge automatically scrolls `HorizontalPager` to the previous/next Home Screen page so you can drag items across pages.
+     - **Drop Behaviors**:
+       - **Empty Grid Cell(s) or Dock Slot**: Places the app or 2×2 folder directly at the exact `(pageIndex, row, column)` coordinate you dropped it on.
+       - **Drop App onto Another App**: Merges both apps into a new expanded 2×2 folder (or swaps positions if dropped near the cell edge).
+       - **Drop App onto an Existing Folder**: Adds the dragged app directly into that folder.
+       - **Drop Folder onto Occupied Cells**: Swaps/shifts the underlying items to free the 2×2 block so the folder lands cleanly where you placed it.
 
 ---
 
-## 3. Key Product Decisions & Trade-Offs
+## 2. Files to Modify
 
-- **Decision 1: Defaulting `FrostedGlassBox` to Borderless (`showBorder = false`)**
-  - *Chosen Approach*: Set `showBorder = false` by default on `FrostedGlassBox` and remove explicit `.border(...)` modifiers on badges, search bars, buttons, and injected WebView glass CSS.
-  - *Why*: Ensures every glass surface—from the bottom search bar and header buttons to sheets and dialogs—shares the exact same seamless edge treatment as the 4-app Home Screen dock.
-  - *Alternatives Considered*: Keeping faint borders on buttons or inputs was rejected because the user explicitly requested removing all borders, lines, and outlines to match the dock.
-
-- **Decision 2: Authentic iOS 3×3 Squircle Folder & Text-Free Opened Folder Popup**
-  - *Chosen Approach*: Render Home Screen folders as an iOS continuous squircle with a 3×3 mini-icon grid (showing real app icon bitmaps inside rounded mini-squircles), and render the opened folder modal with the centered folder title at the top and icon-only app tiles (`showLabel = false`) inside.
-  - *Why*: Matches iOS folder geometry and directly fulfills the requirement to remove all text inside folders so only the folder name stays.
-  - *Alternatives Considered*: Keeping app labels inside the opened popup was passed over per the user's explicit confirmation.
+- **`/app/src/main/java/com/example/data/local/LauncherEntities.kt` & `/app/src/main/java/com/example/data/repository/LauncherRepository.kt`**
+  - Update default `LauncherSettingsEntity` to `homeGridColumns = 5`, `homeGridRows = 7`, `showHomeIconLabels = false`, and migrate existing settings on startup if not customized so the 5-column label-free layout takes effect immediately.
+  - Add repository operations for:
+    - `dropOrSwapHomeItem(...)`: Free placement of 1×1 apps and 2×2 folders at any `(pageIndex, row, column)` or dock slot, automatically relocating overlapping items.
+    - `mergeAppsIntoFolderOnDrop(draggedItemId, targetItemId)` and `addAppItemToFolderOnDrop(draggedItemId, targetFolderId)`.
+- **`/app/src/main/java/com/example/ai/AiHomeOrganizer.kt`**
+  - Update `AI_ORGANIZED` layout generation to arrange Page 1 (`pageIndex = 0`) matching the screenshot: single 1×1 favorite/essential apps down column `0`, and 2×2 expanded folders (`spanX = 2, spanY = 2`) in columns `1..2` and `3..4`, plus remaining 1×1 apps on the bottom row and across Pages 2 & 3.
+- **`/app/src/main/java/com/example/ui/components/FrostedGlassComponents.kt`**
+  - Implement `ExpandedLauncherFolderTile` inside `LauncherFolderTile` supporting both **2×2 Bento** (3 large direct-launch icons + bottom-right 2×2 mini-grid with translucent empty slot placeholders) and **3×3 Dense** (8 direct-launch icons + bottom-right 2×2 mini-cluster).
+  - Update `PixelBottomSearchBar` to also support the compact centered `Search` pill look from the screenshot above the borderless dock.
+- **`/app/src/main/java/com/example/ui/screens/HomeScreenContent.kt` & `/app/src/main/java/com/example/ui/viewmodel/LauncherViewModel.kt`**
+  - Render the 2D multi-span grid (`BoxWithConstraints` coordinate system) so 1×1 apps and 2×2 folders sit at their exact `(row, column, spanX, spanY)` positions without overlapping.
+  - Implement live hold-and-swipe drag-and-drop (`detectDragGesturesAfterLongPress`), floating drag shadow overlay, live target cell/merge highlight, and cross-page edge scrolling.
 
 ---
 
-## 4. Technical Architecture & Data Strategy *(Technical Reference)*
-
-### Architecture & Component Diagram
-
-```
-┌───────────────────────────────────────────────────────────────────────────┐
-│                  Borderless Frosted Glass Design System                   │
-│  FrostedGlassBox(showBorder = false) • Borderless Search & Tonal Buttons  │
-└───────────────────┬───────────────────────────────────┬───────────────────┘
-                    │                                   │
-                    ▼                                   ▼
-┌───────────────────────────────────────┐ ┌─────────────────────────────────┐
-│          Home Screen Surface          │ │   Launcher Overlay Sheets       │
-│  • PixelAtAGlanceHeader (No Border)   │ │  • AppDrawerSheet (No Outlines) │
-│  • LauncherFolderTile (iOS 3x3 Grid)  │ │  • UnifiedSearch & Glass Web    │
-│  • 4-App Frosted Dock (No Border)     │ │  • AI Arrange & Settings Sheets │
-│  • PixelBottomSearchBar (No Border)   │ │  • Borderless Chips & Inputs    │
-└───────────────────┬───────────────────┘ └─────────────────────────────────┘
-                    │
-                    ▼
-┌───────────────────────────────────────────────────────────────────────────┐
-│                   Opened iOS Folder Modal (FolderDetailModal)             │
-│  • Centered Folder Title Only (No Tier Subtitle, No Button Text Labels)   │
-│  • 3-Column iOS App Icon Grid (showLabel = false, Icon-Only App Tiles)    │
-│  • Icon-Only "+" Toggle for Editing Folder Membership & Renaming          │
-└───────────────────────────────────────────────────────────────────────────┘
-```
-
-### Interactive Component & State Mapping
-
-- **Global Glass Surface (`FrostedGlassBox`)**: Updates default `showBorder` parameter to `false` and removes `1.5.dp` dark borders on notification count badges so badges float cleanly with soft elevation.
-- **Bottom Search Bar & Search Sheets (`PixelBottomSearchBar`, `AppDrawerSheet`, `UnifiedSearchSheet`)**: Removes all container borders and `OutlinedTextField` border strokes (`focusedBorderColor = Color.Transparent`, `unfocusedBorderColor = Color.Transparent`), as well as CSS `border` rules in the embedded Glass WebView.
-- **Buttons & Action Menus (`HomeScreenContent`, `AiPreviewAndSettingsSheets`, `UnifiedSearchSheet`)**: Replaces all `OutlinedButton` and bordered `FilterChip` calls with borderless tonal glass buttons and borderless chips (`border = null`).
-- **iOS Folder Tile & Opened Modal (`LauncherFolderTile`, `FolderDetailModal`)**:
-  - `LauncherFolderTile`: Uses `RoundedCornerShape(percent = 26)` iOS squircle, 3×3 mini-icon grid of real app icons, no internal text, and only `folder.folderName` underneath.
-  - `FolderDetailModal`: Displays `folder.folderName` centered at the top with icon-only action buttons (`+` to edit apps, trash icon to delete) and renders all member apps with `showLabel = false` so zero text appears inside the folder body.
+## 3. Verification Plan
+- Run `compile_applet` to verify zero Kotlin or Compose compilation errors.
+- Run unit tests (`gradle :app:testDebugUnitTest`) to verify 5-column multi-span folder layout generation, drag-and-drop placement, swap, and drop-to-merge folder logic.

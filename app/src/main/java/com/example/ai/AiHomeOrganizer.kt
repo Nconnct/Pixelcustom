@@ -159,41 +159,59 @@ class AiHomeOrganizer {
             }
 
             ArrangementMode.AI_ORGANIZED, ArrangementMode.CUSTOM_LAYOUT -> {
-                // Page 1 (pageIndex = 0): Main ML Smart Folders (Productivity, Social, Banking, Media, Shopping, Games, Utilities)
+                // Helper to find a free 2x2 block for expanded folders on Page 0 (preferring cols 1 and 3 on a 5-col grid so col 0 stays free for 1x1 apps)
+                fun nextFolderSlotOnPage0(): Triple<Int, Int, Int>? {
+                    val startRow = 1
+                    val preferredCols = if (cols >= 5) listOf(1, 3, 0, 2) else listOf(0, 2, 1)
+                    for (r in startRow..(rows - 2)) {
+                        for (c in preferredCols) {
+                            if (c + 1 >= cols) continue
+                            val blockCells = listOf(
+                                Triple(0, r, c),
+                                Triple(0, r, c + 1),
+                                Triple(0, r + 1, c),
+                                Triple(0, r + 1, c + 1)
+                            )
+                            if (blockCells.none { it in occupiedCells }) {
+                                occupiedCells.addAll(blockCells)
+                                return Triple(0, r, c)
+                            }
+                        }
+                    }
+                    // Fallback on small grids with widgets: place at next free cell on Page 0
+                    return nextFreeCellOnPage(targetPage = 0)
+                }
+
+                // Page 1 (pageIndex = 0): Expanded 2x2 Smart Folders (supporting both 2x2 Bento and 3x3 Dense styles)
                 val folderClusters = listOf(
                     Triple(
                         "Productivity",
-                        "#3B82F6",
+                        "#3B82F6:BENTO",
                         setOf(DefaultCategory.PRODUCTIVITY.id, DefaultCategory.EDUCATION.id, DefaultCategory.TECH_DEV.id)
                     ),
                     Triple(
-                        "Social",
-                        "#10B981",
-                        setOf(DefaultCategory.SOCIAL.id, DefaultCategory.MESSAGING.id)
-                    ),
-                    Triple(
                         "Banking",
-                        "#2563EB",
+                        "#2563EB:DENSE",
                         setOf(DefaultCategory.BANKING.id, DefaultCategory.UPI_PAYMENTS.id)
                     ),
                     Triple(
+                        "Social",
+                        "#10B981:BENTO",
+                        setOf(DefaultCategory.SOCIAL.id, DefaultCategory.MESSAGING.id)
+                    ),
+                    Triple(
                         "Media",
-                        "#EF4444",
+                        "#EF4444:DENSE",
                         setOf(DefaultCategory.VIDEO_STREAMING.id, DefaultCategory.MUSIC_AUDIO.id, DefaultCategory.PHOTOGRAPHY.id)
                     ),
                     Triple(
                         "Shopping",
-                        "#F59E0B",
-                        setOf(DefaultCategory.SHOPPING.id)
-                    ),
-                    Triple(
-                        "Games",
-                        "#8B5CF6",
-                        setOf(DefaultCategory.GAMES.id)
+                        "#F59E0B:BENTO",
+                        setOf(DefaultCategory.SHOPPING.id, DefaultCategory.GAMES.id)
                     ),
                     Triple(
                         "Utilities",
-                        "#F97316",
+                        "#8B5CF6:BENTO",
                         setOf(
                             DefaultCategory.UTILITIES.id,
                             DefaultCategory.SYSTEM_APPS.id,
@@ -205,15 +223,16 @@ class AiHomeOrganizer {
                 )
 
                 var nextFolderTempId = 100L
-                for ((folderTitle, colorHex, catIds) in folderClusters) {
+                for ((folderTitle, colorHexWithStyle, catIds) in folderClusters) {
                     val matchingApps = rankedApps.filter { app ->
                         app.packageName !in usedPackages &&
                             (app.categoryId in catIds || app.allCategoryIds.any { it in catIds })
                     }
                     if (matchingApps.isNotEmpty()) {
-                        val cell = nextFreeCellOnPage(targetPage = 0) ?: break
-                        val (page, r, c) = cell
-                        val folderMembers = matchingApps.take(8).map { it.packageName }
+                        val block = nextFolderSlotOnPage0() ?: break
+                        val (page, r, c) = block
+                        val isDense = colorHexWithStyle.endsWith(":DENSE")
+                        val folderMembers = matchingApps.take(if (isDense) 12 else 7).map { it.packageName }
                         usedPackages.addAll(folderMembers)
                         val folderId = nextFolderTempId++
                         proposedFolders.add(
@@ -223,7 +242,7 @@ class AiHomeOrganizer {
                                 pageIndex = page,
                                 row = r,
                                 column = c,
-                                colorHex = colorHex,
+                                colorHex = colorHexWithStyle,
                                 memberPackages = folderMembers
                             )
                         )
@@ -232,6 +251,8 @@ class AiHomeOrganizer {
                                 pageIndex = page,
                                 row = r,
                                 column = c,
+                                spanX = 2,
+                                spanY = 2,
                                 isDockItem = false,
                                 itemType = HomeItemType.FOLDER,
                                 customLabel = folderTitle,
@@ -239,6 +260,29 @@ class AiHomeOrganizer {
                             )
                         )
                     }
+                }
+
+                // Fill column 0 (left column) and any remaining open 1x1 cells on Page 0 with top individual apps
+                val unplacedAfterFolders = rankedApps.filter { it.packageName !in usedPackages }
+                val nonDockEssentialApps = rankedApps.filter { it.packageName !in dockPackages }
+                val page0AppCandidates = (unplacedAfterFolders + nonDockEssentialApps).distinctBy { it.packageName }
+                for (app in page0AppCandidates) {
+                    val cell = nextFreeCellOnPage(targetPage = 0) ?: break
+                    val (page, r, c) = cell
+                    usedPackages.add(app.packageName)
+                    proposedItems.add(
+                        HomeScreenItemModel(
+                            pageIndex = page,
+                            row = r,
+                            column = c,
+                            spanX = 1,
+                            spanY = 1,
+                            isDockItem = false,
+                            itemType = HomeItemType.APP_SHORTCUT,
+                            packageName = app.packageName,
+                            customLabel = app.appName
+                        )
+                    )
                 }
 
                 // Pages 2 & 3 (pageIndex = 1 and pageIndex = 2): Extra & frequent individual apps
@@ -260,6 +304,8 @@ class AiHomeOrganizer {
                             pageIndex = page,
                             row = r,
                             column = c,
+                            spanX = 1,
+                            spanY = 1,
                             isDockItem = false,
                             itemType = HomeItemType.APP_SHORTCUT,
                             packageName = app.packageName,
@@ -276,6 +322,8 @@ class AiHomeOrganizer {
                             pageIndex = page,
                             row = r,
                             column = c,
+                            spanX = 1,
+                            spanY = 1,
                             isDockItem = false,
                             itemType = HomeItemType.APP_SHORTCUT,
                             packageName = app.packageName,
@@ -292,10 +340,10 @@ class AiHomeOrganizer {
                     dockPackages = dockPackages,
                     preservedWidgetsCount = preservedWidgets.size,
                     summaryPoints = listOf(
-                        "Page 1: ${proposedFolders.size} uniform circular ML Smart Folders (${proposedFolders.joinToString(", ") { it.folderName }})",
+                        "Page 1: ${proposedFolders.size} expanded 2×2 Smart Folders (2×2 Bento & 3×3 Dense) + left-column apps",
                         "Pages 2 & 3: ${page2Apps.size + page3Apps.size} extra apps arranged across horizontal pages",
                         "Pinned ${dockPackages.size} essential communication & favorite apps to the Frosted Dock",
-                        "Enriched categories using Online Store Metadata + AI & Offline TFLite ML"
+                        "Hold & drag any app or folder to move, swap, or drop onto another item to merge"
                     )
                 )
             }
