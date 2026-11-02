@@ -1,0 +1,13 @@
+<resources>
+    <string name="app_name">PixelCategory Launcher</string>
+    <string name="search_hint">Search apps, contacts, files &amp; web…</string>
+    <string name="drawer_title">All Applications</string>
+    <string name="ai_organize_title">AI Home Organizer</string>
+    <string name="settings_title">Launcher Settings</string>
+    <string name="privacy_title">Privacy &amp; Offline AI Guarantee</string>
+    <string name="set_default_launcher">Set as Default Home</string>
+    <string name="undo_layout">Undo / Restore Layout</string>
+    <string name="icon_packs_title">Icon Packs &amp; Shapes</string>
+    <string name="backup_restore_title">Local Backup &amp; Restore</string>
+    <string name="contacts_permission_rationale">Grant optional Contacts access to search names and numbers locally on your device. Contacts are never uploaded.</string>
+</resources>

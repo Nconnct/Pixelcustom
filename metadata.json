@@ -1,0 +1,6 @@
+{
+  "name": "PixelCategory Launcher",
+  "description": "Privacy-first Pixel-inspired Android home screen launcher with offline AI app categorization, auto-arrangement, unified search, icon packs, and frosted glass customization.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
