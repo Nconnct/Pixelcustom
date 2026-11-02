@@ -82,12 +82,16 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Offset
+import android.view.HapticFeedbackConstants
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -126,6 +130,8 @@ fun UnifiedSearchSheet(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val haptics = LocalHapticFeedback.current
+    val view = LocalView.current
     val keyboardController = LocalSoftwareKeyboardController.current
     val focusRequester = remember { FocusRequester() }
     val settings = launcherState.settings
@@ -175,6 +181,7 @@ fun UnifiedSearchSheet(
 
     val listState = rememberLazyListState()
     var dragOffsetY by remember { mutableFloatStateOf(0f) }
+    var dismissThresholdHapticFired by remember { mutableStateOf(false) }
     val animatedDragOffsetY by animateFloatAsState(
         targetValue = dragOffsetY,
         label = "search_swipe_down_offset"
@@ -187,6 +194,9 @@ fun UnifiedSearchSheet(
                 if (dragOffsetY > 0f && available.y < 0f) {
                     val consumedY = available.y.coerceAtLeast(-dragOffsetY)
                     dragOffsetY = (dragOffsetY + consumedY).coerceAtLeast(0f)
+                    if (dragOffsetY < SEARCH_DISMISS_DRAG_THRESHOLD_PX) {
+                        dismissThresholdHapticFired = false
+                    }
                     return Offset(0f, consumedY)
                 }
                 return Offset.Zero
@@ -202,6 +212,11 @@ fun UnifiedSearchSheet(
                     val atTop = listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset == 0
                     if (atTop || consumed.y == 0f) {
                         dragOffsetY = (dragOffsetY + available.y * 0.85f).coerceAtLeast(0f)
+                        if (!dismissThresholdHapticFired && dragOffsetY >= SEARCH_DISMISS_DRAG_THRESHOLD_PX) {
+                            dismissThresholdHapticFired = true
+                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                        }
                         return Offset(0f, available.y)
                     }
                 }
@@ -214,11 +229,15 @@ fun UnifiedSearchSheet(
                 if (dragOffsetY >= SEARCH_DISMISS_DRAG_THRESHOLD_PX ||
                     (atTop && available.y >= SEARCH_DISMISS_FLING_VELOCITY)
                 ) {
+                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
                     dragOffsetY = 0f
+                    dismissThresholdHapticFired = false
                     closeSearchAndClear()
                     return available
                 }
                 dragOffsetY = 0f
+                dismissThresholdHapticFired = false
                 return Velocity.Zero
             }
         }
@@ -266,12 +285,24 @@ fun UnifiedSearchSheet(
                     .fillMaxWidth()
                     .pointerInput(searchState.activeWebViewUrl) {
                         var headerDragDy = 0f
+                        var headerThresholdFired = false
                         detectVerticalDragGestures(
-                            onDragStart = { headerDragDy = 0f },
+                            onDragStart = {
+                                headerDragDy = 0f
+                                headerThresholdFired = false
+                            },
                             onVerticalDrag = { change, dragAmount ->
                                 change.consume()
                                 headerDragDy += dragAmount
                                 dragOffsetY = (dragOffsetY + dragAmount).coerceAtLeast(0f)
+                                if (!headerThresholdFired &&
+                                    (headerDragDy >= SEARCH_DISMISS_DRAG_THRESHOLD_PX ||
+                                        dragOffsetY >= SEARCH_DISMISS_DRAG_THRESHOLD_PX)
+                                ) {
+                                    headerThresholdFired = true
+                                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                                }
                             },
                             onDragCancel = { dragOffsetY = 0f },
                             onDragEnd = {

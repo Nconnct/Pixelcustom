@@ -1,5 +1,6 @@
 package com.example.ui.components
 
+import android.view.HapticFeedbackConstants
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
@@ -22,7 +23,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.GenericShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Tune
@@ -33,7 +33,11 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -41,7 +45,10 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -57,6 +64,7 @@ import com.example.domain.model.IconShapeOption
 import com.example.ui.theme.FrostedBorderDark
 import com.example.ui.theme.FrostedBorderLight
 import com.example.ui.theme.LocalLauncherTokens
+import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -187,7 +195,8 @@ fun FrostedGlassPageSurface(
 }
 
 /**
- * Clean, Pixel-authentic At-a-Glance Header Widget.
+ * Clean, Pixel-authentic At-a-Glance Header Widget showing only live Time & Date
+ * alongside a small compact AI Arrange icon button and Settings button.
  */
 @Composable
 fun PixelAtAGlanceHeader(
@@ -199,60 +208,67 @@ fun PixelAtAGlanceHeader(
     onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val dateText = remember {
-        SimpleDateFormat("EEE, MMM d", Locale.getDefault()).format(Date())
+    val haptics = LocalHapticFeedback.current
+    val view = LocalView.current
+    var currentMillis by remember { mutableLongStateOf(System.currentTimeMillis()) }
+
+    LaunchedEffect(Unit) {
+        while (true) {
+            currentMillis = System.currentTimeMillis()
+            delay(15_000L)
+        }
+    }
+
+    val timeText = remember(currentMillis) {
+        SimpleDateFormat("h:mm a", Locale.getDefault()).format(Date(currentMillis))
+    }
+    val dateText = remember(currentMillis) {
+        SimpleDateFormat("EEEE, MMM d", Locale.getDefault()).format(Date(currentMillis))
     }
 
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 20.dp, vertical = 10.dp)
+            .padding(horizontal = 20.dp, vertical = 8.dp)
             .testTag("pixel_at_a_glance_header"),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
         Column(modifier = Modifier.weight(1f)) {
             Text(
-                text = dateText,
+                text = timeText,
                 style = MaterialTheme.typography.headlineMedium,
                 color = Color.White,
                 fontWeight = FontWeight.SemiBold
             )
-            Spacer(modifier = Modifier.height(2.dp))
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.AutoAwesome,
-                    contentDescription = null,
-                    tint = Color(0xFF81C995),
-                    modifier = Modifier.size(13.dp)
-                )
-                Text(
-                    text = "$categorizedCount/$totalAppsCount Categorized • Offline AI",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = Color.White.copy(alpha = 0.80f)
-                )
-            }
+            Text(
+                text = dateText,
+                style = MaterialTheme.typography.bodyMedium,
+                color = Color.White.copy(alpha = 0.86f),
+                fontWeight = FontWeight.Medium
+            )
         }
 
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
+            // Small, compact AI Arrange icon button
             FrostedGlassBox(
                 shape = CircleShape,
-                alphaOverride = 0.58f,
+                alphaOverride = 0.56f,
                 modifier = Modifier
-                    .minimumInteractiveComponentSize()
-                    .clickable(onClick = onOpenAiOrganizer)
+                    .size(34.dp)
+                    .clickable {
+                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                        onOpenAiOrganizer()
+                    }
                     .testTag("ai_organize_header_button")
             ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
                 ) {
                     Icon(
                         imageVector = Icons.Default.AutoAwesome,
@@ -260,25 +276,24 @@ fun PixelAtAGlanceHeader(
                         tint = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.size(16.dp)
                     )
-                    Text(
-                        text = "Arrange",
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
                 }
             }
 
             IconButton(
-                onClick = onOpenSettings,
+                onClick = {
+                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                    onOpenSettings()
+                },
                 modifier = Modifier
-                    .size(42.dp)
+                    .size(34.dp)
                     .testTag("home_settings_button")
             ) {
                 Icon(
                     imageVector = Icons.Default.Tune,
                     contentDescription = stringResource(R.string.settings_title),
                     tint = Color.White.copy(alpha = 0.90f),
-                    modifier = Modifier.size(22.dp)
+                    modifier = Modifier.size(19.dp)
                 )
             }
         }
@@ -286,71 +301,53 @@ fun PixelAtAGlanceHeader(
 }
 
 /**
- * Pixel-style Frosted Bottom Search Pill with immediate Unified Search and App Drawer triggers.
+ * Pixel-style Frosted Bottom Search Pill (App Drawer button removed — swipe up opens the App Drawer).
  */
 @Composable
 fun PixelBottomSearchBar(
     onSearchBarClick: () -> Unit,
-    onOpenDrawerClick: () -> Unit,
-    onOpenAiOrganizerClick: () -> Unit,
+    onOpenDrawerClick: () -> Unit = {},
+    onOpenAiOrganizerClick: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val tokens = LocalLauncherTokens.current
+    val haptics = LocalHapticFeedback.current
+    val view = LocalView.current
 
     FrostedGlassBox(
         shape = RoundedCornerShape(tokens.searchCornerRadius),
         alphaOverride = tokens.frostedSurfaceAlpha,
         modifier = modifier
             .fillMaxWidth()
-            .height(52.dp)
+            .height(50.dp)
+            .clickable {
+                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                onSearchBarClick()
+            }
             .testTag("pixel_bottom_search_bar")
     ) {
         Row(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(horizontal = 6.dp),
+                .padding(horizontal = 16.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            // Tapping the main search area opens Unified Search and focuses the input field
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxSize()
-                    .clip(RoundedCornerShape(tokens.searchCornerRadius))
-                    .clickable(onClick = onSearchBarClick)
-                    .padding(horizontal = 12.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Search,
-                    contentDescription = "Search",
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(21.dp)
-                )
-                Text(
-                    text = stringResource(R.string.search_hint),
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
-
-            IconButton(
-                onClick = onOpenDrawerClick,
-                modifier = Modifier
-                    .size(44.dp)
-                    .testTag("open_app_drawer_button")
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Apps,
-                    contentDescription = stringResource(R.string.drawer_title),
-                    tint = MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier.size(22.dp)
-                )
-            }
+            Icon(
+                imageVector = Icons.Default.Search,
+                contentDescription = "Search",
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(21.dp)
+            )
+            Text(
+                text = stringResource(R.string.search_hint),
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f)
+            )
         }
     }
 }
@@ -398,6 +395,8 @@ fun LauncherAppTile(
 ) {
     val shape = remember(iconShape) { resolveIconShape(iconShape) }
     val scaledSize = (iconSizeDp.value * iconScale.coerceIn(0.75f, 1.25f)).dp
+    val haptics = LocalHapticFeedback.current
+    val view = LocalView.current
 
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -407,7 +406,11 @@ fun LauncherAppTile(
             .clip(RoundedCornerShape(14.dp))
             .combinedClickable(
                 onClick = onClick,
-                onLongClick = onLongClick
+                onLongClick = {
+                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                    view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                    onLongClick()
+                }
             )
             .padding(vertical = 4.dp, horizontal = 4.dp)
             .testTag("app_tile_${app.packageName}")
@@ -498,6 +501,9 @@ fun LauncherFolderTile(
     onLongClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val haptics = LocalHapticFeedback.current
+    val view = LocalView.current
+
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
@@ -506,7 +512,11 @@ fun LauncherFolderTile(
             .clip(RoundedCornerShape(16.dp))
             .combinedClickable(
                 onClick = onClick,
-                onLongClick = onLongClick
+                onLongClick = {
+                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                    view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                    onLongClick()
+                }
             )
             .padding(vertical = 4.dp, horizontal = 4.dp)
             .testTag("folder_tile_${folder.id}")

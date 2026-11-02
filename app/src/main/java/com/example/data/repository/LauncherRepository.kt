@@ -2,6 +2,7 @@ package com.example.data.repository
 
 import com.example.ai.AiHomeOrganizer
 import com.example.ai.OfflineAiClassifier
+import com.example.ai.OnlineAppIntelligenceService
 import com.example.data.local.AIClassificationEntity
 import com.example.data.local.AIUserCorrectionEntity
 import com.example.data.local.AppCategoryCrossRef
@@ -42,7 +43,8 @@ class LauncherRepository(
     private val aiClassifier: OfflineAiClassifier,
     private val homeOrganizer: AiHomeOrganizer,
     private val iconPackManager: IconPackManager,
-    private val backupManager: LocalBackupManager
+    private val backupManager: LocalBackupManager,
+    private val onlineIntelligenceService: OnlineAppIntelligenceService? = null
 ) {
 
     val settingsFlow: Flow<LauncherSettingsEntity?> = dao.observeSettings()
@@ -170,11 +172,66 @@ class LauncherRepository(
         // 5. Discover installed apps and run offline AI classification where needed
         refreshInstalledApps()
 
-        // 6. Seed initial Pixel Default home layout if home_screen_items is completely empty
+        // 6. Seed clean ML Smart Folders home layout if home_screen_items or folders are empty
         val currentHomeItems = dao.getHomeItemsSnapshot()
-        if (currentHomeItems.isEmpty()) {
+        val currentFolders = dao.getFoldersSnapshot()
+        if (currentHomeItems.isEmpty() || currentFolders.isEmpty()) {
             seedDefaultHomeLayout()
         }
+    }
+
+    /**
+     * When internet is available, fetches Play Store metadata + AI semantic classification
+     * for uncategorized or lower-confidence apps, updates Room, and keeps ML Smart Folders clean.
+     */
+    suspend fun enrichInstalledAppsWithOnlineIntelligence(): Int = withContext(Dispatchers.IO) {
+        val onlineService = onlineIntelligenceService ?: return@withContext 0
+        if (!onlineService.isInternetAvailable()) return@withContext 0
+
+        val allApps = dao.getAllAppsSnapshot().filter { it.isInstalled && !it.isUserOverridden }
+        val candidates = allApps.filter {
+            it.primaryCategoryId == DefaultCategory.UNCATEGORIZED.id ||
+                it.primaryCategoryId == DefaultCategory.UTILITIES.id ||
+                it.categoryConfidence < 0.85f
+        }.map { Triple(it.packageName, it.appName, it.isSystemApp) }
+
+        if (candidates.isEmpty()) return@withContext 0
+
+        val enrichedList = onlineService.enrichAppsWhenOnline(candidates)
+        var updatedCount = 0
+        for (res in enrichedList) {
+            val current = allApps.firstOrNull { it.packageName == res.packageName } ?: continue
+            if (res.categoryId != current.primaryCategoryId || res.confidence > current.categoryConfidence) {
+                dao.updateAppCategory(
+                    packageName = res.packageName,
+                    categoryId = res.categoryId,
+                    confidence = res.confidence,
+                    isManual = false
+                )
+                dao.upsertAIClassification(
+                    AIClassificationEntity(
+                        packageName = res.packageName,
+                        predictedCategoryId = res.categoryId,
+                        suggestedSecondaryCategoryId = res.secondaryCategoryId,
+                        confidence = res.confidence,
+                        classificationSource = res.source
+                    )
+                )
+                dao.insertAppCategoryCrossRef(
+                    AppCategoryCrossRef(
+                        packageName = res.packageName,
+                        categoryId = res.categoryId,
+                        isManualAssignment = false
+                    )
+                )
+                updatedCount++
+            }
+        }
+
+        if (updatedCount > 0) {
+            seedDefaultHomeLayout()
+        }
+        updatedCount
     }
 
     suspend fun refreshInstalledApps() = withContext(Dispatchers.IO) {
@@ -362,7 +419,7 @@ class LauncherRepository(
         if (apps.isEmpty()) return
 
         val preview = homeOrganizer.generateProposedLayout(
-            mode = ArrangementMode.PIXEL_DEFAULT,
+            mode = ArrangementMode.AI_ORGANIZED,
             installedApps = apps,
             existingItems = emptyList(),
             existingFolders = emptyList(),
@@ -371,6 +428,9 @@ class LauncherRepository(
             dockCapacity = settings.dockIconCount
         )
         applyProposedLayout(preview, saveUndoSnapshot = false)
+        if (settings.homePageCount > 1) {
+            dao.upsertSettings(settings.copy(homePageCount = 1, arrangementMode = ArrangementMode.AI_ORGANIZED.name))
+        }
     }
 
     suspend fun assignAppToCategoryManually(

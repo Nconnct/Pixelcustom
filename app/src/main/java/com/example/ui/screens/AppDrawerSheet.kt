@@ -73,11 +73,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import android.view.HapticFeedbackConstants
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -116,6 +120,8 @@ fun AppDrawerSheet(
     modifier: Modifier = Modifier
 ) {
     val focusManager = LocalFocusManager.current
+    val haptics = LocalHapticFeedback.current
+    val view = LocalView.current
     val settings = state.settings
     val iconShape = remember(settings.iconShape) {
         IconShapeOption.fromId(settings.iconShape)
@@ -150,6 +156,7 @@ fun AppDrawerSheet(
 
     val gridState = rememberLazyGridState()
     var dragOffsetY by remember { mutableFloatStateOf(0f) }
+    var dismissThresholdHapticFired by remember { mutableStateOf(false) }
     val animatedDragOffsetY by animateFloatAsState(
         targetValue = dragOffsetY,
         label = "drawer_swipe_down_offset"
@@ -163,6 +170,9 @@ fun AppDrawerSheet(
                 if (dragOffsetY > 0f && available.y < 0f) {
                     val consumedY = available.y.coerceAtLeast(-dragOffsetY)
                     dragOffsetY = (dragOffsetY + consumedY).coerceAtLeast(0f)
+                    if (dragOffsetY < DRAWER_DISMISS_DRAG_THRESHOLD_PX) {
+                        dismissThresholdHapticFired = false
+                    }
                     return Offset(0f, consumedY)
                 }
                 return Offset.Zero
@@ -178,6 +188,11 @@ fun AppDrawerSheet(
                     val atTop = gridState.firstVisibleItemIndex == 0 && gridState.firstVisibleItemScrollOffset == 0
                     if (atTop || consumed.y == 0f) {
                         dragOffsetY = (dragOffsetY + available.y * 0.85f).coerceAtLeast(0f)
+                        if (!dismissThresholdHapticFired && dragOffsetY >= DRAWER_DISMISS_DRAG_THRESHOLD_PX) {
+                            dismissThresholdHapticFired = true
+                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                        }
                         return Offset(0f, available.y)
                     }
                 }
@@ -189,22 +204,30 @@ fun AppDrawerSheet(
                 if (dragOffsetY >= DRAWER_DISMISS_DRAG_THRESHOLD_PX ||
                     (atTop && available.y >= DRAWER_DISMISS_FLING_VELOCITY)
                 ) {
+                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
                     dragOffsetY = 0f
+                    dismissThresholdHapticFired = false
                     closeAndClearSearch()
                     return available
                 }
                 if (dragOffsetY > 0f) {
                     dragOffsetY = 0f
+                    dismissThresholdHapticFired = false
                 }
                 return Velocity.Zero
             }
 
             override suspend fun onPostFling(consumed: Velocity, available: Velocity): Velocity {
                 if (dragOffsetY >= DRAWER_DISMISS_DRAG_THRESHOLD_PX || available.y >= DRAWER_DISMISS_FLING_VELOCITY) {
+                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
                     dragOffsetY = 0f
+                    dismissThresholdHapticFired = false
                     closeAndClearSearch()
                 } else {
                     dragOffsetY = 0f
+                    dismissThresholdHapticFired = false
                 }
                 return super.onPostFling(consumed, available)
             }
@@ -246,12 +269,24 @@ fun AppDrawerSheet(
                     .fillMaxWidth()
                     .pointerInput(Unit) {
                         var headerDragDy = 0f
+                        var headerThresholdFired = false
                         detectVerticalDragGestures(
-                            onDragStart = { headerDragDy = 0f },
+                            onDragStart = {
+                                headerDragDy = 0f
+                                headerThresholdFired = false
+                            },
                             onVerticalDrag = { change, dragAmount ->
                                 change.consume()
                                 headerDragDy += dragAmount
                                 dragOffsetY = (dragOffsetY + dragAmount).coerceAtLeast(0f)
+                                if (!headerThresholdFired &&
+                                    (headerDragDy >= DRAWER_DISMISS_DRAG_THRESHOLD_PX ||
+                                        dragOffsetY >= DRAWER_DISMISS_DRAG_THRESHOLD_PX)
+                                ) {
+                                    headerThresholdFired = true
+                                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                                }
                             },
                             onDragCancel = {
                                 dragOffsetY = 0f
@@ -454,7 +489,11 @@ fun AppDrawerSheet(
                                 MaterialTheme.colorScheme.surfaceVariant
                             },
                             modifier = Modifier
-                                .clickable { onSelectCategory(cat.id) }
+                                .clickable {
+                                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                                    onSelectCategory(cat.id)
+                                }
                                 .testTag("category_tab_${cat.id}")
                         ) {
                             Row(

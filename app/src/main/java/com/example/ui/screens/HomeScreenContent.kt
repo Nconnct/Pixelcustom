@@ -67,8 +67,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import android.view.HapticFeedbackConstants
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -113,9 +117,11 @@ fun HomeScreenContent(
     modifier: Modifier = Modifier
 ) {
     val settings = state.settings
-    val pageCount = maxOf(2, settings.homePageCount)
+    val pageCount = maxOf(1, settings.homePageCount)
     val pagerState = rememberPagerState(initialPage = 0, pageCount = { pageCount })
     val coroutineScope = rememberCoroutineScope()
+    val haptics = LocalHapticFeedback.current
+    val view = LocalView.current
 
     var showHomeLongPressDialog by remember { mutableStateOf(false) }
     var showCreateFolderDialog by remember { mutableStateOf(false) }
@@ -141,9 +147,20 @@ fun HomeScreenContent(
             .pointerInput(settings.swipeUpAction, settings.swipeDownAction, state.openedFolder) {
                 if (state.openedFolder != null) return@pointerInput
                 var accumulatedDy = 0f
+                var thresholdHapticFired = false
                 detectVerticalDragGestures(
-                    onDragStart = { accumulatedDy = 0f },
-                    onVerticalDrag = { _, dragAmount -> accumulatedDy += dragAmount },
+                    onDragStart = {
+                        accumulatedDy = 0f
+                        thresholdHapticFired = false
+                    },
+                    onVerticalDrag = { _, dragAmount ->
+                        accumulatedDy += dragAmount
+                        if (!thresholdHapticFired && (accumulatedDy < -120f || accumulatedDy > 130f)) {
+                            thresholdHapticFired = true
+                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                        }
+                    },
                     onDragEnd = {
                         if (accumulatedDy < -120f) {
                             when (settings.swipeUpAction) {
@@ -163,6 +180,8 @@ fun HomeScreenContent(
             .pointerInput(Unit) {
                 detectTapGestures(
                     onLongPress = {
+                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                        view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
                         showHomeLongPressDialog = true
                     }
                 )
@@ -428,28 +447,32 @@ fun HomeScreenContent(
                 }
             }
 
-            // 3. Page Indicator Dots
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 4.dp),
-                horizontalArrangement = Arrangement.Center,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                for (i in 0 until pageCount) {
-                    val isSelected = pagerState.currentPage == i
-                    Box(
-                        modifier = Modifier
-                            .padding(horizontal = 4.dp)
-                            .size(width = if (isSelected) 18.dp else 6.dp, height = 6.dp)
-                            .clip(CircleShape)
-                            .background(
-                                if (isSelected) Color.White else Color.White.copy(alpha = 0.35f)
-                            )
-                            .clickable {
-                                coroutineScope.launch { pagerState.animateScrollToPage(i) }
-                            }
-                    )
+            // 3. Page Indicator Dots (only shown when more than 1 page exists)
+            if (pageCount > 1) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    for (i in 0 until pageCount) {
+                        val isSelected = pagerState.currentPage == i
+                        Box(
+                            modifier = Modifier
+                                .padding(horizontal = 4.dp)
+                                .size(width = if (isSelected) 18.dp else 6.dp, height = 6.dp)
+                                .clip(CircleShape)
+                                .background(
+                                    if (isSelected) Color.White else Color.White.copy(alpha = 0.35f)
+                                )
+                                .clickable {
+                                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                                    coroutineScope.launch { pagerState.animateScrollToPage(i) }
+                                }
+                        )
+                    }
                 }
             }
 

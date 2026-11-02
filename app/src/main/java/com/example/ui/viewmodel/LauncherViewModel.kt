@@ -6,6 +6,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.example.ai.AiHomeOrganizer
 import com.example.ai.OfflineAiClassifier
+import com.example.ai.OnlineAppIntelligenceService
 import com.example.data.local.LauncherDatabase
 import com.example.data.local.LauncherSettingsEntity
 import com.example.data.local.LayoutSnapshotEntity
@@ -234,6 +235,8 @@ class LauncherViewModel(
             _iconPacks.value = repository.getAvailableIconPacks()
             _availableWidgets.value = widgetHostController.getAvailableWidgetProviders()
             executeUnifiedSearchFilter("")
+            // Enrich installed apps with online store metadata + AI classification when internet is available
+            repository.enrichInstalledAppsWithOnlineIntelligence()
         }
 
         discoveryEngine.registerPackageChangeListener(
@@ -518,6 +521,7 @@ class LauncherViewModel(
 
     fun generateLayoutPreview(mode: ArrangementMode) {
         viewModelScope.launch {
+            repository.enrichInstalledAppsWithOnlineIntelligence()
             val preview = repository.buildLayoutPreview(mode, uiState.value.installedApps)
             _proposedLayoutPreview.value = preview
             _activeOverlay.value = ActiveOverlaySheet.AI_ORGANIZER_PREVIEW
@@ -698,6 +702,7 @@ class LauncherViewModel(
             val iconPackManager = IconPackManager(appCtx)
             val discoveryEngine = AppDiscoveryEngine(appCtx, iconPackManager)
             val aiClassifier = OfflineAiClassifier(appCtx)
+            val onlineIntelligence = OnlineAppIntelligenceService(appCtx, aiClassifier)
             val homeOrganizer = AiHomeOrganizer()
             val backupManager = LocalBackupManager(dao)
             val searchEngine = UnifiedSearchEngine(appCtx)
@@ -708,7 +713,8 @@ class LauncherViewModel(
                 aiClassifier = aiClassifier,
                 homeOrganizer = homeOrganizer,
                 iconPackManager = iconPackManager,
-                backupManager = backupManager
+                backupManager = backupManager,
+                onlineIntelligenceService = onlineIntelligence
             )
             @Suppress("UNCHECKED_CAST")
             return LauncherViewModel(

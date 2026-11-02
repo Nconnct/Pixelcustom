@@ -16,12 +16,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import org.junit.runner.RunWith
-import org.robolectric.RobolectricTestRunner
-import org.robolectric.annotation.Config
 
-@RunWith(RobolectricTestRunner::class)
-@Config(sdk = [36])
 class ExampleUnitTest {
 
     @Test
@@ -102,6 +97,7 @@ class ExampleUnitTest {
             AppInfo("Signal", "org.thoughtcrime.securesms", categoryId = DefaultCategory.MESSAGING.id),
             AppInfo("SBI YONO", "com.sbi.lotusintouch", categoryId = DefaultCategory.BANKING.id),
             AppInfo("Google Pay", "com.google.android.apps.nbu.paisa.user", categoryId = DefaultCategory.UPI_PAYMENTS.id),
+            AppInfo("Gmail", "com.google.android.gm", categoryId = DefaultCategory.PRODUCTIVITY.id),
             AppInfo("Chrome", "com.android.chrome", categoryId = DefaultCategory.BROWSERS.id, isFavorite = true)
         )
         val existingWidget = HomeScreenItemModel(
@@ -123,8 +119,15 @@ class ExampleUnitTest {
             existingFolders = emptyList(),
             gridColumns = 4,
             gridRows = 5,
-            dockCapacity = 4
+            dockCapacity = 2
         )
+
+        // Clean single-page ML folder arrangement
+        assertEquals(1, preview.pagesCount)
+        val folderNames = preview.proposedFolders.map { it.folderName }.toSet()
+        assertTrue("Social" in folderNames)
+        assertTrue("Banking" in folderNames)
+        assertTrue("Productivity" in folderNames)
 
         // Preserves existing widget
         assertEquals(1, preview.preservedWidgetsCount)
