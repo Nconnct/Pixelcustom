@@ -1,56 +1,32 @@
-# Expanded 2×2 Bento/3×3 Folders & Real-Time Hold-and-Swipe Drag-and-Drop Plan
+# Home Screen Drag-and-Drop, Folder Resizing & Full-Screen Borderless Opened Folder Plan
 
-## 1. Visual & Functional Goals (Matching Your Reference Screenshot)
+## 1. Reliable Hold-and-Swipe Drag-and-Drop Across the Home Screen & Dock
+- **Root Cause & Fix for Gesture Conflicts**:
+  - Previously, child tiles (`LauncherAppTile`, `LauncherFolderTile`, and `FolderInteractiveAppIcon`) attached `.combinedClickable(onLongClick = ...)` modifiers that consumed long-press pointer events before the parent grid cell's `detectDragGesturesAfterLongPress` could begin tracking finger movement.
+  - Additionally, the root vertical swipe detector (`PointerEventPass.Initial`) could intercept vertical drag movement if the drag state was not synchronized via `rememberUpdatedState`, and fallback items on Pages 2/3 had negative IDs that prevented saving their dragged coordinates.
+- **Unified Pointer & Drag Architecture (`HomeScreenContent.kt` & `FrostedGlassComponents.kt`)**:
+  - Replace competing child `onLongClick` handlers on Home Screen grid and Dock items with a unified gesture pipeline so holding and swiping any app icon or folder immediately lifts a floating preview (`1.08x` scale) under your finger.
+  - Ensure all items across Pages 1, 2, and 3 are backed by persisted database records (or automatically materialized on drag) so any app or folder can be freely placed at **any `(row, column)` coordinate** on the 5×6 grid without snapping back.
+  - Support dropping an app onto any empty cell, swapping with an existing item, dragging between the 5×6 grid and the 4-icon Dock, edge-scrolling across pages, or dropping an app onto another app/folder center to merge into a folder.
 
-1. **5-Column Label-Free Home Screen Layout (`5 × 7` Grid)**
-   - Update the default Home Screen grid to **5 columns** and **7 rows** with **app/folder text labels hidden (`showHomeIconLabels = false`)** so the Home Screen replicates the clean, label-free layout in your screenshot:
-     - **Left column (`col = 0`)**: Single 1×1 circular app shortcuts stacked vertically.
-     - **Middle & Right columns (`cols 1..2` and `cols 3..4`)**: Pairs of expanded **2×2 frosted glass folders** (`spanX = 2, spanY = 2`) side-by-side, plus additional 1×1 app icons below them.
-     - **Compact Frosted Search Pill**: Centered `Search` pill above the borderless bottom dock.
+## 2. Folder Resizing via Floating Quick-Action Pill (`1×1`, `2×2 Bento`, `2×2 Dense 3×3`)
+- **Stationary Long-Press Floating Pill**:
+  - Holding a folder without dragging opens a sleek, borderless frosted glass **Floating Folder Action Pill** directly above/below the folder on the Home Screen (while starting to swipe immediately drags the folder instead).
+  - The floating pill lets you switch the folder size and layout with one tap:
+    - **1×1 Compact** (`spanX = 1, spanY = 1` regular circular/squircle folder icon)
+    - **2×2 Bento** (`spanX = 2, spanY = 2` with 3 large direct-launch icons + bottom-right 2×2 mini-grid)
+    - **2×2 Dense 3×3** (`spanX = 2, spanY = 2` with up to 8 medium direct-launch icons + 9th-slot 2×2 mini-grid)
+  - Also includes quick actions to **Rename**, **Add Apps**, or **Remove Folder**.
+- **Repository & Grid Span Persistence (`LauncherRepository.kt` & `LauncherViewModel.kt`)**:
+  - Add `resizeAndStyleFolder(folderId: Long, spanX: Int, spanY: Int, displayStyle: FolderDisplayStyle)` to update both the folder's `HomeScreenItemEntity` (`spanX`, `spanY`) and `FolderEntity` (`colorHex` style suffix), automatically resolving any grid cell collisions when expanding from `1×1` to `2×2`.
+  - Remove the `coerceAtLeast(2)` constraint in `HomeScreenContent.kt` so folders with `spanX = 1, spanY = 1` render at `1×1` size on the 5-column grid.
 
-2. **Expanded 2×2 Home Screen Folders (`2×2 Bento` & `3×3 Dense` Modes)**
-   - Upgrade `LauncherFolderTile` in `FrostedGlassComponents.kt` to render as a borderless frosted glass card (`RoundedCornerShape(26.dp)`) spanning **2×2 grid cells** (`spanX = 2, spanY = 2`) with zero text labels:
-     - **2×2 Bento Style ("3 Large + 2×2 Mini Grid")**:
-       - Used for folders with up to 7 apps (or when toggled to `2x2 Bento` in the folder popup):
-       - **Top-Left, Top-Right, Bottom-Left quadrants**: 3 full-size circular app icons that launch the respective app **directly on tap**.
-       - **Bottom-Right quadrant**: A **2×2 mini-grid** showing up to 4 mini app icons and subtle translucent rounded-square placeholders (`Color.White.copy(alpha = 0.22f)`) for remaining empty slots, exactly as shown in your screenshot. Tapping the bottom-right mini-grid opens the full `FolderDetailModal`.
-     - **3×3 Dense Style ("8 Medium + 2×2 Mini Grid")**:
-       - Used automatically for larger folders (8+ apps) or when toggled to `3x3 Dense` in the folder popup:
-       - **First 8 slots (`0..7`) of the 3×3 grid**: Medium circular app icons that launch the respective app **directly on tap**.
-       - **9th slot (bottom-right)**: A **2×2 mini-cluster** of 4 tiny app icons that opens the full `FolderDetailModal` when tapped.
-     - **Folder Style Switcher**: Inside `FolderDetailModal`, add a quick pill toggle (`Auto` / `2×2 Bento` / `3×3 Dense`) so you can also switch any individual folder's display mode at any time.
-
-3. **Real-Time Hold-and-Swipe Drag-and-Drop (`pointerInput` Gesture)**
-   - Replace the static two-step move dialog with interactive **touch-hold-and-swipe dragging** directly on the Home Screen:
-     - **Hold & Lift**: Long-pressing any app icon or 2×2 folder triggers haptic feedback and lifts a floating drag preview that tracks your finger smoothly across the screen.
-     - **Quick Action Pill While Holding**: If you long-press and release without dragging, show the context menu / folder modal; as soon as your finger moves past touch slop, enter live drag mode with a highlighted drop target cell (or 2×2 footprint for folders) on the grid or dock.
-     - **Edge Page Auto-Scroll**: Holding a dragged item near the left or right screen edge automatically scrolls `HorizontalPager` to the previous/next Home Screen page so you can drag items across pages.
-     - **Drop Behaviors**:
-       - **Empty Grid Cell(s) or Dock Slot**: Places the app or 2×2 folder directly at the exact `(pageIndex, row, column)` coordinate you dropped it on.
-       - **Drop App onto Another App**: Merges both apps into a new expanded 2×2 folder (or swaps positions if dropped near the cell edge).
-       - **Drop App onto an Existing Folder**: Adds the dragged app directly into that folder.
-       - **Drop Folder onto Occupied Cells**: Swaps/shifts the underlying items to free the 2×2 block so the folder lands cleanly where you placed it.
-
----
-
-## 2. Files to Modify
-
-- **`/app/src/main/java/com/example/data/local/LauncherEntities.kt` & `/app/src/main/java/com/example/data/repository/LauncherRepository.kt`**
-  - Update default `LauncherSettingsEntity` to `homeGridColumns = 5`, `homeGridRows = 7`, `showHomeIconLabels = false`, and migrate existing settings on startup if not customized so the 5-column label-free layout takes effect immediately.
-  - Add repository operations for:
-    - `dropOrSwapHomeItem(...)`: Free placement of 1×1 apps and 2×2 folders at any `(pageIndex, row, column)` or dock slot, automatically relocating overlapping items.
-    - `mergeAppsIntoFolderOnDrop(draggedItemId, targetItemId)` and `addAppItemToFolderOnDrop(draggedItemId, targetFolderId)`.
-- **`/app/src/main/java/com/example/ai/AiHomeOrganizer.kt`**
-  - Update `AI_ORGANIZED` layout generation to arrange Page 1 (`pageIndex = 0`) matching the screenshot: single 1×1 favorite/essential apps down column `0`, and 2×2 expanded folders (`spanX = 2, spanY = 2`) in columns `1..2` and `3..4`, plus remaining 1×1 apps on the bottom row and across Pages 2 & 3.
-- **`/app/src/main/java/com/example/ui/components/FrostedGlassComponents.kt`**
-  - Implement `ExpandedLauncherFolderTile` inside `LauncherFolderTile` supporting both **2×2 Bento** (3 large direct-launch icons + bottom-right 2×2 mini-grid with translucent empty slot placeholders) and **3×3 Dense** (8 direct-launch icons + bottom-right 2×2 mini-cluster).
-  - Update `PixelBottomSearchBar` to also support the compact centered `Search` pill look from the screenshot above the borderless dock.
-- **`/app/src/main/java/com/example/ui/screens/HomeScreenContent.kt` & `/app/src/main/java/com/example/ui/viewmodel/LauncherViewModel.kt`**
-  - Render the 2D multi-span grid (`BoxWithConstraints` coordinate system) so 1×1 apps and 2×2 folders sit at their exact `(row, column, spanX, spanY)` positions without overlapping.
-  - Implement live hold-and-swipe drag-and-drop (`detectDragGesturesAfterLongPress`), floating drag shadow overlay, live target cell/merge highlight, and cross-page edge scrolling.
-
----
-
-## 3. Verification Plan
-- Run `compile_applet` to verify zero Kotlin or Compose compilation errors.
-- Run unit tests (`gradle :app:testDebugUnitTest`) to verify 5-column multi-span folder layout generation, drag-and-drop placement, swap, and drop-to-merge folder logic.
+## 3. Full-Screen Borderless Opened Folder View (Matching Reference Screenshot)
+- **Borderless Full-Screen Wallpaper Scrim (`FolderDetailModal` in `HomeScreenContent.kt`)**:
+  - Replace the boxed dialog card and header action buttons with a full-screen borderless overlay over the dimmed/blurred Home wallpaper, matching your `"Tools"` folder screenshot.
+  - Display the folder title (e.g., `"Tools"`) in large, clean white typography (`32sp`, left-aligned above the first column of icons).
+  - Render member apps in a spacious **3-column floating grid** of large circular icons (`60.dp`) with generous spacing and **zero app text labels** or surrounding container borders.
+  - Tapping anywhere on the empty wallpaper area outside the icons smoothly closes the folder.
+- **Tap Title to Rename & Drag Icons Out to Remove**:
+  - **Tap Folder Title**: Tapping the `"Tools"` title switches it inline into a borderless white text input to rename the folder (plus an optional subtle `+` chip next to the title while editing to add apps).
+  - **Hold & Drag App Out of Folder**: Holding and dragging any app icon inside the opened folder beyond the folder grid area closes the folder view and drops that app directly onto the Home Screen as an independent shortcut (removing it from the folder).

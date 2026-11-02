@@ -628,20 +628,39 @@ class LauncherRepository(
         targetPage: Int,
         targetRow: Int,
         targetColumn: Int,
-        toDock: Boolean = false
+        toDock: Boolean = false,
+        fallbackPackageName: String? = null
     ) = withContext(Dispatchers.IO) {
         val settings = dao.getSettingsSnapshot() ?: LauncherSettingsEntity()
         val cols = settings.homeGridColumns.coerceIn(3, 6)
         val rows = settings.homeGridRows.coerceIn(4, 7)
         val items = dao.getHomeItemsSnapshot()
-        val moving = items.firstOrNull { it.id == itemId } ?: return@withContext
+        val moving = items.firstOrNull { it.id == itemId } ?: run {
+            val pkg = fallbackPackageName ?: return@withContext
+            val app = dao.getAppByPackage(pkg)
+            val newId = dao.insertHomeItem(
+                HomeScreenItemEntity(
+                    pageIndex = targetPage,
+                    row = targetRow.coerceAtLeast(0),
+                    column = targetColumn.coerceAtLeast(0),
+                    spanX = 1,
+                    spanY = 1,
+                    isDockItem = false,
+                    itemType = HomeItemType.APP_SHORTCUT.name,
+                    packageName = pkg,
+                    customLabel = app?.appName ?: pkg,
+                    isPinnedByUser = true
+                )
+            )
+            dao.getHomeItemsSnapshot().firstOrNull { it.id == newId } ?: return@withContext
+        }
 
         if (toDock) {
             // Only 1x1 app shortcuts can move into the dock
             if (moving.itemType == HomeItemType.FOLDER.name) return@withContext
             val clampedDockSlot = targetColumn.coerceIn(0, settings.dockIconCount - 1)
             val occupant = items.firstOrNull {
-                it.id != itemId && it.isDockItem && it.dockIndex == clampedDockSlot
+                it.id != moving.id && it.isDockItem && it.dockIndex == clampedDockSlot
             }
             if (occupant != null) {
                 dao.updateHomeItem(
@@ -682,7 +701,7 @@ class LauncherRepository(
             }
         }
 
-        val otherPageItems = items.filter { it.id != itemId && !it.isDockItem && it.pageIndex == targetPage }
+        val otherPageItems = items.filter { it.id != moving.id && !it.isDockItem && it.pageIndex == targetPage }
         val overlappingItems = otherPageItems.filter { item ->
             var overlaps = false
             for (r in item.row until (item.row + item.spanY.coerceAtLeast(1))) {
@@ -805,19 +824,20 @@ class LauncherRepository(
      */
     suspend fun mergeHomeItemsIntoFolder(
         draggedItemId: Long,
-        targetItemId: Long
+        targetItemId: Long,
+        draggedFallbackPkg: String? = null
     ): String? = withContext(Dispatchers.IO) {
-        if (draggedItemId == targetItemId) return@withContext null
+        if (draggedItemId == targetItemId && draggedItemId > 0L) return@withContext null
         val settings = dao.getSettingsSnapshot() ?: LauncherSettingsEntity()
         val cols = settings.homeGridColumns.coerceIn(3, 6)
         val rows = settings.homeGridRows.coerceIn(4, 7)
         val items = dao.getHomeItemsSnapshot()
         val folders = dao.getFoldersSnapshot()
 
-        val dragged = items.firstOrNull { it.id == draggedItemId } ?: return@withContext null
+        val dragged = items.firstOrNull { it.id == draggedItemId }
         val target = items.firstOrNull { it.id == targetItemId } ?: return@withContext null
 
-        val draggedPkg = dragged.packageName ?: return@withContext null
+        val draggedPkg = dragged?.packageName ?: draggedFallbackPkg ?: return@withContext null
 
         // Case 1: Dropping an App Shortcut onto an existing Folder
         if (target.itemType == HomeItemType.FOLDER.name && target.folderId != null) {
@@ -838,7 +858,9 @@ class LauncherRepository(
                     memberPackagesCsv = updatedMembers.joinToString(",")
                 )
             )
-            dao.deleteHomeItemById(dragged.id)
+            if (dragged != null) {
+                dao.deleteHomeItemById(dragged.id)
+            }
             return@withContext existingFolder.folderName
         }
 
@@ -859,7 +881,9 @@ class LauncherRepository(
             val folderRow = target.row.coerceIn(startRow, (rows - 2).coerceAtLeast(startRow))
             val folderCol = target.column.coerceIn(0, (cols - 2).coerceAtLeast(0))
 
-            dao.deleteHomeItemById(dragged.id)
+            if (dragged != null) {
+                dao.deleteHomeItemById(dragged.id)
+            }
             dao.deleteHomeItemById(target.id)
 
             val folderId = dao.insertFolder(
@@ -905,6 +929,108 @@ class LauncherRepository(
         val updatedColorHex = "${domain.cleanColorHex}:$nextSuffix"
         dao.insertFolder(existing.copy(colorHex = updatedColorHex))
         if (nextSuffix == "DENSE") "3×3 Dense" else "2×2 Bento"
+    }
+
+    /**
+     * Resizes a folder on the Home Screen between 1x1 Compact and 2x2 Expanded (Bento or Dense 3x3),
+     * automatically resolving any grid cell collisions when expanding to 2x2.
+     */
+    suspend fun resizeAndStyleFolder(
+        folderId: Long,
+        spanX: Int,
+        spanY: Int,
+        displayStyle: com.example.domain.model.FolderDisplayStyle
+    ): String? = withContext(Dispatchers.IO) {
+        val existingFolder = dao.getFoldersSnapshot().firstOrNull { it.id == folderId } ?: return@withContext null
+        val domain = existingFolder.toDomainModel()
+        val styleSuffix = if (displayStyle == com.example.domain.model.FolderDisplayStyle.DENSE_3X3) "DENSE" else "BENTO"
+        val updatedColorHex = "${domain.cleanColorHex}:$styleSuffix"
+        dao.insertFolder(existingFolder.copy(colorHex = updatedColorHex))
+
+        val homeItem = dao.getHomeItemsSnapshot().firstOrNull { it.folderId == folderId }
+        val clampedSpanX = spanX.coerceIn(1, 2)
+        val clampedSpanY = spanY.coerceIn(1, 2)
+        if (homeItem != null) {
+            dao.updateHomeItem(
+                homeItem.copy(
+                    spanX = clampedSpanX,
+                    spanY = clampedSpanY
+                )
+            )
+            moveHomeItemToCell(
+                itemId = homeItem.id,
+                targetPage = homeItem.pageIndex,
+                targetRow = homeItem.row,
+                targetColumn = homeItem.column,
+                toDock = false
+            )
+        }
+        when {
+            clampedSpanX == 1 && clampedSpanY == 1 -> "1×1 Compact Folder"
+            displayStyle == com.example.domain.model.FolderDisplayStyle.DENSE_3X3 -> "2×2 Dense 3×3 Folder"
+            else -> "2×2 Bento Folder"
+        }
+    }
+
+    /**
+     * Removes an app from an opened folder and places it directly onto the Home Screen grid.
+     */
+    suspend fun extractAppFromFolderToHome(
+        folderId: Long,
+        packageName: String,
+        targetPage: Int? = null
+    ): String? = withContext(Dispatchers.IO) {
+        val existingFolder = dao.getFoldersSnapshot().firstOrNull { it.id == folderId } ?: return@withContext null
+        val currentMembers = existingFolder.memberPackagesCsv
+            .split(",")
+            .map { it.trim() }
+            .filter { it.isNotEmpty() && it != packageName }
+
+        val folderHomeItem = dao.getHomeItemsSnapshot().firstOrNull { it.folderId == folderId }
+        val destinationPage = targetPage ?: folderHomeItem?.pageIndex ?: existingFolder.pageIndex
+
+        if (currentMembers.isEmpty()) {
+            if (folderHomeItem != null) {
+                dao.deleteHomeItemById(folderHomeItem.id)
+            }
+            dao.deleteFolderById(folderId)
+        } else {
+            dao.insertFolder(
+                existingFolder.copy(
+                    memberPackagesCsv = currentMembers.joinToString(",")
+                )
+            )
+        }
+
+        // Place extracted app on the Home Screen page near the folder
+        val settings = dao.getSettingsSnapshot() ?: LauncherSettingsEntity()
+        val cols = settings.homeGridColumns.coerceIn(3, 6)
+        val rows = settings.homeGridRows.coerceIn(4, 7)
+        val startRow = if (destinationPage == 0 && settings.showAtAGlanceWidget) 1 else 0
+        val app = dao.getAppByPackage(packageName)
+
+        val newItemId = dao.insertHomeItem(
+            HomeScreenItemEntity(
+                pageIndex = destinationPage,
+                row = (folderHomeItem?.row ?: startRow).coerceIn(startRow, rows - 1),
+                column = (folderHomeItem?.column ?: 0).coerceIn(0, cols - 1),
+                spanX = 1,
+                spanY = 1,
+                isDockItem = false,
+                itemType = HomeItemType.APP_SHORTCUT.name,
+                packageName = packageName,
+                customLabel = app?.appName ?: packageName,
+                isPinnedByUser = true
+            )
+        )
+        moveHomeItemToCell(
+            itemId = newItemId,
+            targetPage = destinationPage,
+            targetRow = (folderHomeItem?.row ?: startRow).coerceIn(startRow, rows - 1),
+            targetColumn = ((folderHomeItem?.column ?: 0) + (folderHomeItem?.spanX ?: 1)).coerceIn(0, cols - 1),
+            toDock = false
+        )
+        app?.appName ?: packageName
     }
 
     suspend fun createFolderOnHome(

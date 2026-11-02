@@ -455,6 +455,7 @@ fun LauncherAppTile(
     showCategoryBadge: Boolean = false,
     notificationCount: Int = 0,
     labelColor: Color = Color.White,
+    enableInternalLongClick: Boolean = true,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
     modifier: Modifier = Modifier
@@ -464,20 +465,26 @@ fun LauncherAppTile(
     val haptics = LocalHapticFeedback.current
     val view = LocalView.current
 
+    val clickModifier = if (enableInternalLongClick) {
+        Modifier.combinedClickable(
+            onClick = onClick,
+            onLongClick = {
+                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                onLongClick()
+            }
+        )
+    } else {
+        Modifier.clickable(onClick = onClick)
+    }
+
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
         modifier = modifier
             .minimumInteractiveComponentSize()
             .clip(RoundedCornerShape(14.dp))
-            .combinedClickable(
-                onClick = onClick,
-                onLongClick = {
-                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                    view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
-                    onLongClick()
-                }
-            )
+            .then(clickModifier)
             .padding(vertical = 2.dp, horizontal = 2.dp)
             .testTag("app_tile_${app.packageName}")
     ) {
@@ -579,10 +586,11 @@ fun LauncherAppTile(
 }
 
 /**
- * Expanded 2x2 Home Screen Frosted Glass Folder Tile supporting both:
- * 1) `FolderDisplayStyle.BENTO_2X2`: 3 large direct-launchable circular app icons (Top-Left, Top-Right, Bottom-Left)
+ * Expanded 2x2 or Compact 1x1 Home Screen Frosted Glass Folder Tile supporting:
+ * 1) `1x1 Compact` when `isExpanded2x2 == false`
+ * 2) `FolderDisplayStyle.BENTO_2X2`: 3 large direct-launchable circular app icons (Top-Left, Top-Right, Bottom-Left)
  *    + a 2x2 mini-grid in the Bottom-Right quadrant that opens the full folder modal when tapped.
- * 2) `FolderDisplayStyle.DENSE_3X3`: Up to 8 medium direct-launchable circular app icons in slots 0..7
+ * 3) `FolderDisplayStyle.DENSE_3X3`: Up to 8 medium direct-launchable circular app icons in slots 0..7
  *    + a 2x2 mini-grid in the 9th (Bottom-Right) slot that opens the full folder modal when tapped.
  */
 @OptIn(ExperimentalFoundationApi::class)
@@ -595,6 +603,7 @@ fun LauncherFolderTile(
     showLabel: Boolean,
     isExpanded2x2: Boolean = true,
     unreadNotificationCount: Int = 0,
+    enableInternalLongClick: Boolean = true,
     onLaunchApp: (AppInfo) -> Unit = {},
     onClick: () -> Unit,
     onLongClick: () -> Unit,
@@ -605,6 +614,27 @@ fun LauncherFolderTile(
     val folderShape = RoundedCornerShape(26.dp)
     val style = folder.displayStyle
 
+    val folderClickModifier = if (enableInternalLongClick) {
+        Modifier.combinedClickable(
+            onClick = {
+                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                onClick()
+            },
+            onLongClick = {
+                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                onLongClick()
+            }
+        )
+    } else {
+        Modifier.clickable {
+            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+            view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+            onClick()
+        }
+    }
+
     if (!isExpanded2x2) {
         val scaledSize = (iconSizeDp.value * iconScale.coerceIn(0.75f, 1.25f)).dp
         val miniIconSize = (scaledSize.value * 0.235f).dp
@@ -614,18 +644,7 @@ fun LauncherFolderTile(
             modifier = modifier
                 .minimumInteractiveComponentSize()
                 .clip(RoundedCornerShape(16.dp))
-                .combinedClickable(
-                    onClick = {
-                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                        view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
-                        onClick()
-                    },
-                    onLongClick = {
-                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                        view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
-                        onLongClick()
-                    }
-                )
+                .then(folderClickModifier)
                 .padding(4.dp)
                 .testTag("folder_tile_${folder.id}")
         ) {
@@ -687,18 +706,7 @@ fun LauncherFolderTile(
                 showBorder = false,
                 modifier = Modifier
                     .fillMaxSize()
-                    .combinedClickable(
-                        onClick = {
-                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
-                            onClick()
-                        },
-                        onLongClick = {
-                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                            view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
-                            onLongClick()
-                        }
-                    )
+                    .then(folderClickModifier)
             ) {
                 if (style == com.example.domain.model.FolderDisplayStyle.BENTO_2X2) {
                     // Style 1: 2x2 Bento ("3 Large Circular Icons + Bottom-Right 2x2 Mini-Grid")
@@ -724,6 +732,7 @@ fun LauncherFolderTile(
                                 FolderInteractiveAppIcon(
                                     app = memberApps.getOrNull(0),
                                     iconSize = 44.dp,
+                                    enableInternalLongClick = enableInternalLongClick,
                                     onLaunchApp = onLaunchApp,
                                     onOpenFolder = onClick,
                                     onLongClick = onLongClick
@@ -736,6 +745,7 @@ fun LauncherFolderTile(
                                 FolderInteractiveAppIcon(
                                     app = memberApps.getOrNull(1),
                                     iconSize = 44.dp,
+                                    enableInternalLongClick = enableInternalLongClick,
                                     onLaunchApp = onLaunchApp,
                                     onOpenFolder = onClick,
                                     onLongClick = onLongClick
@@ -758,6 +768,7 @@ fun LauncherFolderTile(
                                 FolderInteractiveAppIcon(
                                     app = memberApps.getOrNull(2),
                                     iconSize = 44.dp,
+                                    enableInternalLongClick = enableInternalLongClick,
                                     onLaunchApp = onLaunchApp,
                                     onOpenFolder = onClick,
                                     onLongClick = onLongClick
@@ -770,18 +781,7 @@ fun LauncherFolderTile(
                                     .weight(1f)
                                     .fillMaxSize()
                                     .clip(RoundedCornerShape(12.dp))
-                                    .combinedClickable(
-                                        onClick = {
-                                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                            view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
-                                            onClick()
-                                        },
-                                        onLongClick = {
-                                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                                            view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
-                                            onLongClick()
-                                        }
-                                    )
+                                    .then(folderClickModifier)
                                     .testTag("folder_mini_grid_${folder.id}"),
                                 contentAlignment = Alignment.Center
                             ) {
@@ -839,6 +839,7 @@ fun LauncherFolderTile(
                                                 FolderInteractiveAppIcon(
                                                     app = app,
                                                     iconSize = 30.dp,
+                                                    enableInternalLongClick = enableInternalLongClick,
                                                     onLaunchApp = onLaunchApp,
                                                     onOpenFolder = onClick,
                                                     onLongClick = onLongClick
@@ -853,18 +854,7 @@ fun LauncherFolderTile(
                                                 modifier = Modifier
                                                     .size(30.dp)
                                                     .clip(RoundedCornerShape(8.dp))
-                                                    .combinedClickable(
-                                                        onClick = {
-                                                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                                            view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
-                                                            onClick()
-                                                        },
-                                                        onLongClick = {
-                                                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                                                            view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
-                                                            onLongClick()
-                                                        }
-                                                    )
+                                                    .then(folderClickModifier)
                                                     .testTag("folder_mini_grid_${folder.id}"),
                                                 contentAlignment = Alignment.Center
                                             ) {
@@ -924,6 +914,7 @@ fun LauncherFolderTile(
 private fun FolderInteractiveAppIcon(
     app: AppInfo?,
     iconSize: Dp,
+    enableInternalLongClick: Boolean = true,
     onLaunchApp: (AppInfo) -> Unit,
     onOpenFolder: () -> Unit,
     onLongClick: () -> Unit
@@ -942,6 +933,27 @@ private fun FolderInteractiveAppIcon(
         return
     }
 
+    val iconClickModifier = if (enableInternalLongClick) {
+        Modifier.combinedClickable(
+            onClick = {
+                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                onLaunchApp(app)
+            },
+            onLongClick = {
+                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                onLongClick()
+            }
+        )
+    } else {
+        Modifier.clickable {
+            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+            view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+            onLaunchApp(app)
+        }
+    }
+
     Surface(
         shape = CircleShape,
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
@@ -949,18 +961,7 @@ private fun FolderInteractiveAppIcon(
         modifier = Modifier
             .size(iconSize)
             .clip(CircleShape)
-            .combinedClickable(
-                onClick = {
-                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                    view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
-                    onLaunchApp(app)
-                },
-                onLongClick = {
-                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                    view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
-                    onLongClick()
-                }
-            )
+            .then(iconClickModifier)
     ) {
         if (app.appIcon != null) {
             Image(

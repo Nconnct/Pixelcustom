@@ -447,15 +447,26 @@ class LauncherViewModel(
         }
     }
 
-    fun moveHomeItem(itemId: Long, targetPage: Int, targetRow: Int, targetCol: Int, toDock: Boolean = false) {
+    fun moveHomeItem(
+        itemId: Long,
+        targetPage: Int,
+        targetRow: Int,
+        targetCol: Int,
+        toDock: Boolean = false,
+        fallbackPackageName: String? = null
+    ) {
         viewModelScope.launch {
-            repository.moveHomeItemToCell(itemId, targetPage, targetRow, targetCol, toDock)
+            repository.moveHomeItemToCell(itemId, targetPage, targetRow, targetCol, toDock, fallbackPackageName)
         }
     }
 
-    fun mergeHomeItems(draggedItemId: Long, targetItemId: Long) {
+    fun mergeHomeItems(
+        draggedItemId: Long,
+        targetItemId: Long,
+        draggedFallbackPkg: String? = null
+    ) {
         viewModelScope.launch {
-            val folderName = repository.mergeHomeItemsIntoFolder(draggedItemId, targetItemId)
+            val folderName = repository.mergeHomeItemsIntoFolder(draggedItemId, targetItemId, draggedFallbackPkg)
             if (folderName != null) {
                 showBanner("Merged into '$folderName'")
             }
@@ -467,6 +478,29 @@ class LauncherViewModel(
             val newStyleLabel = repository.toggleFolderDisplayStyle(folderId)
             if (newStyleLabel != null) {
                 showBanner("Folder style: $newStyleLabel")
+            }
+        }
+    }
+
+    fun resizeFolder(
+        folderId: Long,
+        spanX: Int,
+        spanY: Int,
+        displayStyle: com.example.domain.model.FolderDisplayStyle
+    ) {
+        viewModelScope.launch {
+            val label = repository.resizeAndStyleFolder(folderId, spanX, spanY, displayStyle)
+            if (label != null) {
+                showBanner("Resized to $label")
+            }
+        }
+    }
+
+    fun extractAppFromFolder(folderId: Long, packageName: String, targetPage: Int? = null) {
+        viewModelScope.launch {
+            val appName = repository.extractAppFromFolderToHome(folderId, packageName, targetPage)
+            if (appName != null) {
+                showBanner("Moved '$appName' to Home Screen")
             }
         }
     }

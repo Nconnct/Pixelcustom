@@ -62,6 +62,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -70,14 +71,18 @@ import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.PointerEventPass
@@ -96,9 +101,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.example.domain.model.AppInfo
 import com.example.domain.model.CategoryModel
 import com.example.domain.model.DefaultCategory
+import com.example.domain.model.FolderDisplayStyle
 import com.example.domain.model.FolderModel
 import com.example.domain.model.HomeItemType
 import com.example.domain.model.HomeScreenItemModel
@@ -130,6 +137,7 @@ fun HomeScreenContent(
     state: LauncherUiState,
     widgetHostController: WidgetHostController,
     movingHomeItem: HomeScreenItemModel?,
+    onStartMoveHomeItem: (HomeScreenItemModel) -> Unit = {},
     onCancelMoveMode: () -> Unit,
     onOpenOverlay: (ActiveOverlaySheet) -> Unit,
     onLaunchApp: (AppInfo) -> Unit,
@@ -137,9 +145,11 @@ fun HomeScreenContent(
     onCloseFolder: () -> Unit,
     onOpenAppContextMenu: (AppInfo, HomeScreenItemModel?) -> Unit,
     onRemoveHomeItem: (Long) -> Unit,
-    onMoveHomeItem: (Long, Int, Int, Int, Boolean) -> Unit,
-    onMergeHomeItems: (Long, Long) -> Unit = { _, _ -> },
+    onMoveHomeItem: (Long, Int, Int, Int, Boolean, String?) -> Unit,
+    onMergeHomeItems: (Long, Long, String?) -> Unit = { _, _, _ -> },
     onToggleFolderStyle: (Long) -> Unit = {},
+    onResizeFolder: (Long, Int, Int, FolderDisplayStyle) -> Unit = { _, _, _, _ -> },
+    onExtractAppFromFolder: (Long, String, Int?) -> Unit = { _, _, _ -> },
     onCreateSmartFolder: (String, List<String>, String, Int) -> Unit,
     onUpdateFolder: (Long, String, List<String>) -> Unit,
     onDeleteFolder: (Long) -> Unit,
@@ -160,13 +170,14 @@ fun HomeScreenContent(
 
     val verticalSwipeThresholdPx = remember(density) { with(density) { 42.dp.toPx() } }
     val axisLockSlopPx = remember(density) { with(density) { 14.dp.toPx() } }
-    val dragMoveThresholdPx = remember(density) { with(density) { 10.dp.toPx() } }
+    val dragMoveThresholdPx = remember(density) { with(density) { 8.dp.toPx() } }
     val edgeScrollZonePx = remember(density) { with(density) { 36.dp.toPx() } }
 
     var showHomeLongPressDialog by remember { mutableStateOf(false) }
     var showCreateFolderDialog by remember { mutableStateOf(false) }
+    var openFolderInEditMode by remember { mutableStateOf(false) }
 
-    // Hold-and-Swipe Real-Time Drag State
+    // Hold-and-Swipe Real-Time Drag State & Floating Folder Resize Pill State
     var rootBoundsInRoot by remember { mutableStateOf(Rect.Zero) }
     var activeGridBoundsInRoot by remember { mutableStateOf(Rect.Zero) }
     var dockBoundsInRoot by remember { mutableStateOf(Rect.Zero) }
@@ -177,6 +188,15 @@ fun HomeScreenContent(
     var hoverDockSlot by remember { mutableStateOf<Int?>(null) }
     var mergeTargetItem by remember { mutableStateOf<HomeScreenItemModel?>(null) }
     var lastEdgePageTurnMs by remember { mutableLongStateOf(0L) }
+
+    var folderQuickMenuTarget by remember { mutableStateOf<PlacedGridItem?>(null) }
+    var folderQuickMenuBounds by remember { mutableStateOf(Rect.Zero) }
+    var editingFolderSheetFolderId by remember { mutableStateOf<Long?>(null) }
+    var editingFolderInitial1x1 by remember { mutableStateOf(false) }
+
+    val latestDraggedItem by rememberUpdatedState(draggedItem)
+    val latestFolderQuickMenu by rememberUpdatedState(folderQuickMenuTarget)
+    val latestOpenedFolder by rememberUpdatedState(state.openedFolder)
 
     val appsByPkg = remember(state.installedApps) {
         state.installedApps.associateBy { it.packageName }
@@ -203,16 +223,15 @@ fun HomeScreenContent(
             .pointerInput(
                 settings.swipeUpAction,
                 settings.swipeDownAction,
-                state.openedFolder,
                 showHomeLongPressDialog,
-                showCreateFolderDialog,
-                draggedItem
+                showCreateFolderDialog
             ) {
-                if (state.openedFolder != null || showHomeLongPressDialog || showCreateFolderDialog || draggedItem != null) {
+                if (showHomeLongPressDialog || showCreateFolderDialog) {
                     return@pointerInput
                 }
                 awaitEachGesture {
                     val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                    val downTimeMs = System.currentTimeMillis()
                     var totalDx = 0f
                     var totalDy = 0f
                     var lockedHorizontal = false
@@ -224,7 +243,16 @@ fun HomeScreenContent(
                             ?: event.changes.firstOrNull()
                             ?: break
                         if (!change.pressed) break
-                        if (draggedItem != null) break
+                        // Never intercept pointer events when a folder modal, quick menu, or drag is active,
+                        // or once a touch has been held long enough to be a long-press / drag (>= 360ms).
+                        if (
+                            latestOpenedFolder != null ||
+                            latestDraggedItem != null ||
+                            latestFolderQuickMenu != null ||
+                            (!gestureTriggered && System.currentTimeMillis() - downTimeMs >= 360L)
+                        ) {
+                            break
+                        }
 
                         val dx = change.position.x - change.previousPosition.x
                         val dy = change.position.y - change.previousPosition.y
@@ -259,16 +287,6 @@ fun HomeScreenContent(
                     }
                 }
             }
-            .pointerInput(draggedItem) {
-                if (draggedItem != null) return@pointerInput
-                detectTapGestures(
-                    onLongPress = {
-                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                        view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
-                        showHomeLongPressDialog = true
-                    }
-                )
-            }
             .testTag("home_screen_root")
     ) {
         Column(
@@ -290,7 +308,7 @@ fun HomeScreenContent(
 
             // Active Drag / Move Mode Banner
             val activeDragged = draggedItem
-            if (activeDragged != null) {
+            if (activeDragged != null && dragTotalDistance > dragMoveThresholdPx) {
                 FrostedGlassBox(
                     shape = RoundedCornerShape(18.dp),
                     alphaOverride = 0.56f,
@@ -312,7 +330,10 @@ fun HomeScreenContent(
                                 "Release to merge into '$targetLabel'"
                             }
                             hoverDockSlot != null -> "Release to place in Dock slot ${(hoverDockSlot ?: 0) + 1}"
-                            hoverGridCell != null -> "Release to place on Page ${pagerState.currentPage + 1}"
+                            hoverGridCell != null -> {
+                                val cell = hoverGridCell!!
+                                "Release to place at Row ${cell.first + 1}, Col ${cell.second + 1} (Page ${pagerState.currentPage + 1})"
+                            }
                             else -> "Hold & swipe to move, swap, or drop on an icon to merge"
                         }
                         Text(
@@ -339,7 +360,7 @@ fun HomeScreenContent(
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Text(
-                            text = "Tap any highlighted slot to place '${movingHomeItem.customLabel ?: "Item"}'",
+                            text = "Tap any highlighted grid cell to place '${movingHomeItem.customLabel ?: "Item"}'",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurface,
                             modifier = Modifier.weight(1f)
@@ -351,7 +372,7 @@ fun HomeScreenContent(
                 }
             }
 
-            // 2. 3-Page Horizontal Home Screen Workspace Grid (5-Column Multi-Span Layout with 2x2 Folders & 1x1 Apps)
+            // 2. 3-Page Horizontal Home Screen Workspace Grid (5-Column Multi-Span Layout with 1x1 / 2x2 Folders & 1x1 Apps)
             HorizontalPager(
                 state = pagerState,
                 userScrollEnabled = draggedItem == null,
@@ -410,7 +431,7 @@ fun HomeScreenContent(
                 val startRow = if (pageIndex == 0 && settings.showAtAGlanceWidget) 1 else 0
                 val displayRows = (totalGridRows - startRow).coerceAtLeast(4)
 
-                // Deterministically place multi-span (2x2 folders) and 1x1 app shortcuts on this page without overlap
+                // Deterministically place multi-span (2x2 or 1x1 folders) and 1x1 app shortcuts at their user-chosen (row, col)
                 val placedPageItems = remember(nonWidgetItems, displayRows, gridCols, startRow) {
                     val occupied = Array(displayRows) { BooleanArray(gridCols) }
                     val placed = mutableListOf<PlacedGridItem>()
@@ -436,8 +457,8 @@ fun HomeScreenContent(
 
                     for (item in nonWidgetItems) {
                         val isFolder = item.itemType == HomeItemType.FOLDER
-                        val sx = if (isFolder) item.spanX.coerceAtLeast(2).coerceAtMost(gridCols) else 1
-                        val sy = if (isFolder) item.spanY.coerceAtLeast(2).coerceAtMost(displayRows) else 1
+                        val sx = if (isFolder) item.spanX.coerceIn(1, gridCols) else 1
+                        val sy = if (isFolder) item.spanY.coerceIn(1, displayRows) else 1
                         val desiredR = (item.row - startRow).coerceIn(0, (displayRows - sy).coerceAtLeast(0))
                         val desiredC = item.column.coerceIn(0, (gridCols - sx).coerceAtLeast(0))
                         if (canFit(desiredR, desiredC, sx, sy)) {
@@ -450,8 +471,8 @@ fun HomeScreenContent(
 
                     for (item in unplaced) {
                         val isFolder = item.itemType == HomeItemType.FOLDER
-                        val sx = if (isFolder) item.spanX.coerceAtLeast(2).coerceAtMost(gridCols) else 1
-                        val sy = if (isFolder) item.spanY.coerceAtLeast(2).coerceAtMost(displayRows) else 1
+                        val sx = if (isFolder) item.spanX.coerceIn(1, gridCols) else 1
+                        val sy = if (isFolder) item.spanY.coerceIn(1, displayRows) else 1
                         outer@ for (r in 0..(displayRows - sy).coerceAtLeast(0)) {
                             for (c in 0..(gridCols - sx).coerceAtLeast(0)) {
                                 if (canFit(r, c, sx, sy)) {
@@ -548,7 +569,7 @@ fun HomeScreenContent(
                         }
                     }
 
-                    // Multi-Span 2D Workspace Grid (Supports 1x1 Apps and 2x2 Expanded Folders + Real-Time Drag & Drop)
+                    // Multi-Span 2D Workspace Grid (Supports 1x1 Apps, 1x1 Compact Folders, and 2x2 Expanded Folders + Real-Time Drag & Drop)
                     BoxWithConstraints(
                         modifier = Modifier
                             .weight(1f)
@@ -558,11 +579,27 @@ fun HomeScreenContent(
                                     activeGridBoundsInRoot = coords.boundsInRoot()
                                 }
                             }
+                            .pointerInput(pageIndex) {
+                                detectTapGestures(
+                                    onTap = {
+                                        if (folderQuickMenuTarget != null) {
+                                            folderQuickMenuTarget = null
+                                        }
+                                    },
+                                    onLongPress = {
+                                        if (draggedItem == null && folderQuickMenuTarget == null) {
+                                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                            view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                                            showHomeLongPressDialog = true
+                                        }
+                                    }
+                                )
+                            }
                     ) {
                         val cellWidth = maxWidth / gridCols
                         val cellHeight = maxHeight / displayRows
 
-                        // 1. Render subtle drop target slots when movingHomeItem != null or when dragging
+                        // 1. Render subtle drop target slots when movingHomeItem != null
                         if (movingHomeItem != null) {
                             for (r in 0 until displayRows) {
                                 for (c in 0 until gridCols) {
@@ -573,9 +610,16 @@ fun HomeScreenContent(
                                             .size(width = cellWidth, height = cellHeight)
                                             .padding(3.dp)
                                             .clip(RoundedCornerShape(16.dp))
-                                            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.18f))
+                                            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.22f))
                                             .clickable {
-                                                onMoveHomeItem(movingHomeItem.id, pageIndex, dbRow, c, false)
+                                                onMoveHomeItem(
+                                                    movingHomeItem.id,
+                                                    pageIndex,
+                                                    dbRow,
+                                                    c,
+                                                    false,
+                                                    movingHomeItem.packageName
+                                                )
                                                 onCancelMoveMode()
                                             }
                                     )
@@ -585,10 +629,11 @@ fun HomeScreenContent(
 
                         // Highlight hovered cell/footprint during active hold-and-swipe drag on current page
                         val currentHoverCell = hoverGridCell
-                        if (draggedItem != null && pagerState.currentPage == pageIndex && currentHoverCell != null && mergeTargetItem == null) {
-                            val isDraggedFolder = draggedItem?.itemType == HomeItemType.FOLDER
-                            val dragSpanX = if (isDraggedFolder) 2 else 1
-                            val dragSpanY = if (isDraggedFolder) 2 else 1
+                        val activeDraggedItem = draggedItem
+                        if (activeDraggedItem != null && pagerState.currentPage == pageIndex && currentHoverCell != null && mergeTargetItem == null) {
+                            val isDraggedFolder = activeDraggedItem.itemType == HomeItemType.FOLDER
+                            val dragSpanX = if (isDraggedFolder) activeDraggedItem.spanX.coerceIn(1, 2) else 1
+                            val dragSpanY = if (isDraggedFolder) activeDraggedItem.spanY.coerceIn(1, 2) else 1
                             val clampedR = currentHoverCell.first.coerceIn(0, (displayRows - dragSpanY).coerceAtLeast(0))
                             val clampedC = currentHoverCell.second.coerceIn(0, (gridCols - dragSpanX).coerceAtLeast(0))
                             Box(
@@ -596,41 +641,33 @@ fun HomeScreenContent(
                                     .offset(x = cellWidth * clampedC, y = cellHeight * clampedR)
                                     .size(width = cellWidth * dragSpanX, height = cellHeight * dragSpanY)
                                     .padding(4.dp)
-                                    .clip(RoundedCornerShape(if (isDraggedFolder) 26.dp else 18.dp))
-                                    .background(Color.White.copy(alpha = 0.22f))
-                                    .border(
-                                        width = 1.5.dp,
-                                        color = Color.White.copy(alpha = 0.65f),
-                                        shape = RoundedCornerShape(if (isDraggedFolder) 26.dp else 18.dp)
-                                    )
+                                    .clip(RoundedCornerShape(if (dragSpanX >= 2) 26.dp else 18.dp))
+                                    .background(Color.White.copy(alpha = 0.24f))
                             )
                         }
 
-                        // 2. Render each PlacedGridItem (1x1 App or 2x2 Expanded Folder)
+                        // 2. Render each PlacedGridItem (1x1 App, 1x1 Compact Folder, or 2x2 Expanded Folder)
                         for (placed in placedPageItems) {
                             val cellItem = placed.item
                             val dbRow = placed.displayRow + startRow
                             val isBeingDragged = draggedItem?.id == cellItem.id && dragTotalDistance > dragMoveThresholdPx
                             val isMergeTarget = mergeTargetItem?.id == cellItem.id
-                            var itemBoundsInRoot by remember(cellItem.id) { mutableStateOf(Rect.Zero) }
+                            var itemBoundsInRoot by remember(cellItem.id, placed.displayRow, placed.col, placed.spanX, placed.spanY) {
+                                mutableStateOf(Rect.Zero)
+                            }
 
                             Box(
                                 modifier = Modifier
                                     .offset(x = cellWidth * placed.col, y = cellHeight * placed.displayRow)
                                     .size(width = cellWidth * placed.spanX, height = cellHeight * placed.spanY)
-                                    .alpha(if (isBeingDragged) 0.28f else 1f)
-                                    .scale(if (isMergeTarget) 1.07f else 1f)
+                                    .alpha(if (isBeingDragged) 0.25f else 1f)
+                                    .scale(if (isMergeTarget) 1.08f else 1f)
                                     .then(
                                         if (isMergeTarget) {
                                             Modifier
                                                 .padding(2.dp)
                                                 .clip(RoundedCornerShape(26.dp))
-                                                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.32f))
-                                                .border(
-                                                    width = 2.dp,
-                                                    color = Color.White.copy(alpha = 0.85f),
-                                                    shape = RoundedCornerShape(26.dp)
-                                                )
+                                                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.36f))
                                         } else {
                                             Modifier
                                         }
@@ -638,7 +675,7 @@ fun HomeScreenContent(
                                     .onGloballyPositioned { coords ->
                                         itemBoundsInRoot = coords.boundsInRoot()
                                     }
-                                    .pointerInput(cellItem.id, pageIndex, displayRows, gridCols) {
+                                    .pointerInput(cellItem.id, pageIndex, displayRows, gridCols, placed.spanX, placed.spanY) {
                                         detectDragGesturesAfterLongPress(
                                             onDragStart = { startOffset ->
                                                 haptics.performHapticFeedback(HapticFeedbackType.LongPress)
@@ -649,11 +686,22 @@ fun HomeScreenContent(
                                                 hoverGridCell = placed.displayRow to placed.col
                                                 hoverDockSlot = null
                                                 mergeTargetItem = null
+                                                // Immediately show floating folder resize/style pill on long-press of a folder;
+                                                // if user starts dragging, we dismiss the pill in onDrag.
+                                                if (cellItem.itemType == HomeItemType.FOLDER) {
+                                                    folderQuickMenuTarget = placed
+                                                    folderQuickMenuBounds = itemBoundsInRoot
+                                                } else {
+                                                    folderQuickMenuTarget = null
+                                                }
                                             },
                                             onDrag = { change, dragAmount ->
                                                 change.consume()
                                                 dragFingerInRoot += dragAmount
                                                 dragTotalDistance += dragAmount.getDistance()
+                                                if (dragTotalDistance > dragMoveThresholdPx && folderQuickMenuTarget != null) {
+                                                    folderQuickMenuTarget = null
+                                                }
 
                                                 // Auto-scroll pager when dragging near left/right screen edges
                                                 val now = System.currentTimeMillis()
@@ -712,7 +760,7 @@ fun HomeScreenContent(
                                                         val occHeight = occupant.spanY * cHeightPx
                                                         val normX = (relX - occLeft) / occWidth
                                                         val normY = (relY - occTop) / occHeight
-                                                        if (normX in 0.18f..0.82f && normY in 0.18f..0.82f) {
+                                                        if (normX in 0.22f..0.78f && normY in 0.22f..0.78f) {
                                                             mergeTargetItem = occupant.item
                                                         } else {
                                                             mergeTargetItem = null
@@ -738,7 +786,7 @@ fun HomeScreenContent(
                                                 if (currentDragged == null) return@detectDragGesturesAfterLongPress
 
                                                 if (movedDistance <= dragMoveThresholdPx) {
-                                                    // Stationary long-press -> open context menu or folder modal
+                                                    // Stationary long-press -> open App Context Menu or Floating Folder Resize Pill
                                                     when (currentDragged.itemType) {
                                                         HomeItemType.APP_SHORTCUT -> {
                                                             val app = currentDragged.packageName?.let { appsByPkg[it] }
@@ -747,21 +795,24 @@ fun HomeScreenContent(
                                                             }
                                                         }
                                                         HomeItemType.FOLDER -> {
-                                                            val fId = currentDragged.folderId
-                                                            if (fId != null) {
-                                                                onOpenFolder(fId)
-                                                            }
+                                                            folderQuickMenuTarget = placed
+                                                            folderQuickMenuBounds = itemBoundsInRoot
                                                         }
                                                         else -> Unit
                                                     }
-                                                } else if (currentDragged.id > 0L) {
+                                                } else {
+                                                    folderQuickMenuTarget = null
                                                     haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                                     view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
                                                     val destPage = pagerState.currentPage
                                                     val destStartRow = if (destPage == 0 && settings.showAtAGlanceWidget) 1 else 0
                                                     when {
                                                         targetMerge != null && targetMerge.id > 0L -> {
-                                                            onMergeHomeItems(currentDragged.id, targetMerge.id)
+                                                            onMergeHomeItems(
+                                                                currentDragged.id,
+                                                                targetMerge.id,
+                                                                currentDragged.packageName
+                                                            )
                                                         }
                                                         targetDock != null -> {
                                                             onMoveHomeItem(
@@ -769,7 +820,8 @@ fun HomeScreenContent(
                                                                 0,
                                                                 settings.homeGridRows - 1,
                                                                 targetDock,
-                                                                true
+                                                                true,
+                                                                currentDragged.packageName
                                                             )
                                                         }
                                                         targetCell != null -> {
@@ -778,7 +830,8 @@ fun HomeScreenContent(
                                                                 destPage,
                                                                 targetCell.first + destStartRow,
                                                                 targetCell.second,
-                                                                false
+                                                                false,
+                                                                currentDragged.packageName
                                                             )
                                                         }
                                                     }
@@ -812,20 +865,33 @@ fun HomeScreenContent(
                                                 showLabel = settings.showHomeIconLabels,
                                                 isExpanded2x2 = placed.spanX >= 2 && placed.spanY >= 2,
                                                 unreadNotificationCount = folderUnreadCount,
+                                                enableInternalLongClick = false,
                                                 onClick = {
-                                                    if (movingHomeItem != null) {
-                                                        onMoveHomeItem(movingHomeItem.id, pageIndex, dbRow, placed.col, false)
+                                                    if (folderQuickMenuTarget != null) {
+                                                        folderQuickMenuTarget = null
+                                                    } else if (movingHomeItem != null) {
+                                                        onMoveHomeItem(
+                                                            movingHomeItem.id,
+                                                            pageIndex,
+                                                            dbRow,
+                                                            placed.col,
+                                                            false,
+                                                            movingHomeItem.packageName
+                                                        )
                                                         onCancelMoveMode()
                                                     } else {
+                                                        openFolderInEditMode = false
                                                         onOpenFolder(folder.id)
                                                     }
                                                 },
-                                                onLongClick = {
-                                                    if (movingHomeItem == null && draggedItem == null) {
-                                                        onOpenFolder(folder.id)
+                                                onLongClick = {},
+                                                onLaunchApp = { app ->
+                                                    if (folderQuickMenuTarget != null) {
+                                                        folderQuickMenuTarget = null
+                                                    } else {
+                                                        onLaunchApp(app)
                                                     }
-                                                },
-                                                onLaunchApp = onLaunchApp
+                                                }
                                             )
                                         }
                                     }
@@ -842,19 +908,25 @@ fun HomeScreenContent(
                                                 showLabel = settings.showHomeIconLabels,
                                                 notificationCount = appUnread,
                                                 labelColor = Color.White,
+                                                enableInternalLongClick = false,
                                                 onClick = {
-                                                    if (movingHomeItem != null) {
-                                                        onMoveHomeItem(movingHomeItem.id, pageIndex, dbRow, placed.col, false)
+                                                    if (folderQuickMenuTarget != null) {
+                                                        folderQuickMenuTarget = null
+                                                    } else if (movingHomeItem != null) {
+                                                        onMoveHomeItem(
+                                                            movingHomeItem.id,
+                                                            pageIndex,
+                                                            dbRow,
+                                                            placed.col,
+                                                            false,
+                                                            movingHomeItem.packageName
+                                                        )
                                                         onCancelMoveMode()
                                                     } else {
                                                         onLaunchApp(app)
                                                     }
                                                 },
-                                                onLongClick = {
-                                                    if (movingHomeItem == null && draggedItem == null) {
-                                                        onOpenAppContextMenu(app, cellItem)
-                                                    }
-                                                }
+                                                onLongClick = {}
                                             )
                                         }
                                     }
@@ -974,7 +1046,8 @@ fun HomeScreenContent(
                                                             0,
                                                             settings.homeGridRows - 1,
                                                             dockSlot,
-                                                            true
+                                                            true,
+                                                            movingHomeItem.packageName
                                                         )
                                                         onCancelMoveMode()
                                                     }
@@ -983,13 +1056,28 @@ fun HomeScreenContent(
                                             Modifier
                                         }
                                     )
-                                    .pointerInput(dockItem?.id ?: (-dockSlot.toLong())) {
-                                        if (dockItem == null) return@pointerInput
+                                    .pointerInput(dockItem?.id ?: (-dockSlot.toLong()), dockApp?.packageName) {
+                                        val effectiveDockItem = dockItem ?: dockApp?.let { app ->
+                                            HomeScreenItemModel(
+                                                id = -2000L - dockSlot,
+                                                pageIndex = 0,
+                                                row = settings.homeGridRows - 1,
+                                                column = dockSlot,
+                                                spanX = 1,
+                                                spanY = 1,
+                                                isDockItem = true,
+                                                dockIndex = dockSlot,
+                                                itemType = HomeItemType.APP_SHORTCUT,
+                                                packageName = app.packageName,
+                                                customLabel = app.appName
+                                            )
+                                        } ?: return@pointerInput
                                         detectDragGesturesAfterLongPress(
                                             onDragStart = { startOffset ->
                                                 haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                                                 view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
-                                                draggedItem = dockItem
+                                                folderQuickMenuTarget = null
+                                                draggedItem = effectiveDockItem
                                                 dragTotalDistance = 0f
                                                 dragFingerInRoot = dockSlotBoundsInRoot.topLeft + startOffset
                                                 hoverDockSlot = dockSlot
@@ -1051,7 +1139,8 @@ fun HomeScreenContent(
                                                                 0,
                                                                 settings.homeGridRows - 1,
                                                                 targetDock,
-                                                                true
+                                                                true,
+                                                                currentDragged.packageName
                                                             )
                                                         }
                                                         targetCell != null -> {
@@ -1060,7 +1149,8 @@ fun HomeScreenContent(
                                                                 destPage,
                                                                 targetCell.first + destStartRow,
                                                                 targetCell.second,
-                                                                false
+                                                                false,
+                                                                currentDragged.packageName
                                                             )
                                                         }
                                                     }
@@ -1086,25 +1176,25 @@ fun HomeScreenContent(
                                         iconShape = iconShape,
                                         showLabel = false,
                                         notificationCount = dockUnread,
+                                        enableInternalLongClick = false,
                                         onClick = {
-                                            if (movingHomeItem != null) {
+                                            if (folderQuickMenuTarget != null) {
+                                                folderQuickMenuTarget = null
+                                            } else if (movingHomeItem != null) {
                                                 onMoveHomeItem(
                                                     movingHomeItem.id,
                                                     0,
                                                     settings.homeGridRows - 1,
                                                     dockSlot,
-                                                    true
+                                                    true,
+                                                    movingHomeItem.packageName
                                                 )
                                                 onCancelMoveMode()
                                             } else {
                                                 onLaunchApp(dockApp)
                                             }
                                         },
-                                        onLongClick = {
-                                            if (draggedItem == null) {
-                                                onOpenAppContextMenu(dockApp, dockItem)
-                                            }
-                                        }
+                                        onLongClick = {}
                                     )
                                 } else {
                                     IconButton(
@@ -1125,10 +1215,189 @@ fun HomeScreenContent(
             }
         }
 
+        // --- Floating Folder Resize & Style Pill (On Long-Press of Any Folder) ---
+        val activeQuickMenu = folderQuickMenuTarget
+        if (activeQuickMenu != null && draggedItem == null) {
+            val targetFolder = activeQuickMenu.item.folderId?.let { foldersById[it] }
+            if (targetFolder != null) {
+                val isCurrently1x1 = activeQuickMenu.spanX == 1 && activeQuickMenu.spanY == 1
+                val isCurrentlyBento = !isCurrently1x1 && targetFolder.displayStyle == FolderDisplayStyle.BENTO_2X2
+                val isCurrentlyDense = !isCurrently1x1 && targetFolder.displayStyle == FolderDisplayStyle.DENSE_3X3
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null
+                        ) {
+                            folderQuickMenuTarget = null
+                        }
+                ) {
+                    val pillWidthDp = 290.dp
+                    val pillHeightDp = 96.dp
+                    val pillWidthPx = with(density) { pillWidthDp.toPx() }
+                    val pillHeightPx = with(density) { pillHeightDp.toPx() }
+                    val centerX = folderQuickMenuBounds.center.x - rootBoundsInRoot.left
+                    val desiredX = (centerX - pillWidthPx / 2f)
+                        .coerceIn(with(density) { 12.dp.toPx() }, (rootBoundsInRoot.width - pillWidthPx - with(density) { 12.dp.toPx() }).coerceAtLeast(12f))
+                    val aboveY = folderQuickMenuBounds.top - rootBoundsInRoot.top - pillHeightPx - with(density) { 10.dp.toPx() }
+                    val belowY = folderQuickMenuBounds.bottom - rootBoundsInRoot.top + with(density) { 10.dp.toPx() }
+                    val desiredY = if (aboveY >= with(density) { 48.dp.toPx() }) aboveY else belowY
+
+                    FrostedGlassBox(
+                        shape = RoundedCornerShape(24.dp),
+                        alphaOverride = 0.82f,
+                        showBorder = false,
+                        modifier = Modifier
+                            .offset { IntOffset(desiredX.roundToInt(), desiredY.roundToInt()) }
+                            .width(pillWidthDp)
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null
+                            ) {}
+                            .testTag("folder_floating_resize_pill")
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp, vertical = 10.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            // Row 1: Folder Size & Style Options (Regular 1x1, Enlarged 2x2 Bento, XXL 2x2 Dense)
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                FolderStylePillChip(
+                                    label = "Regular",
+                                    selected = isCurrently1x1,
+                                    onClick = {
+                                        onResizeFolder(targetFolder.id, 1, 1, targetFolder.displayStyle)
+                                        folderQuickMenuTarget = null
+                                    },
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .testTag("resize_folder_1x1_chip")
+                                )
+                                FolderStylePillChip(
+                                    label = "Enlarged",
+                                    selected = isCurrentlyBento,
+                                    onClick = {
+                                        onResizeFolder(targetFolder.id, 2, 2, FolderDisplayStyle.BENTO_2X2)
+                                        folderQuickMenuTarget = null
+                                    },
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .testTag("resize_folder_bento_chip")
+                                )
+                                FolderStylePillChip(
+                                    label = "XXL",
+                                    selected = isCurrentlyDense,
+                                    onClick = {
+                                        onResizeFolder(targetFolder.id, 2, 2, FolderDisplayStyle.DENSE_3X3)
+                                        folderQuickMenuTarget = null
+                                    },
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .testTag("resize_folder_dense_chip")
+                                )
+                            }
+
+                            // Row 2: Quick Actions (Edit folder sheet, Move on Grid, Remove)
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceEvenly,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(14.dp))
+                                        .clickable {
+                                            editingFolderInitial1x1 = isCurrently1x1
+                                            editingFolderSheetFolderId = targetFolder.id
+                                            folderQuickMenuTarget = null
+                                        }
+                                        .padding(horizontal = 10.dp, vertical = 4.dp)
+                                        .testTag("open_edit_folder_sheet_button"),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Edit,
+                                        contentDescription = "Edit folder",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                    Text(
+                                        text = "Edit folder",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = Color.White
+                                    )
+                                }
+
+                                Row(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(14.dp))
+                                        .clickable {
+                                            val itemToMove = activeQuickMenu.item
+                                            folderQuickMenuTarget = null
+                                            onStartMoveHomeItem(itemToMove)
+                                        }
+                                        .padding(horizontal = 10.dp, vertical = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.OpenWith,
+                                        contentDescription = "Move Folder",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                    Text(
+                                        text = "Move",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = Color.White
+                                    )
+                                }
+
+                                Row(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(14.dp))
+                                        .clickable {
+                                            folderQuickMenuTarget = null
+                                            onDeleteFolder(targetFolder.id)
+                                        }
+                                        .padding(horizontal = 10.dp, vertical = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Delete,
+                                        contentDescription = "Delete Folder",
+                                        tint = MaterialTheme.colorScheme.error,
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                    Text(
+                                        text = "Remove",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = MaterialTheme.colorScheme.error
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         // --- Floating Drag Preview Under User's Finger ---
         val floatingDragged = draggedItem
         if (floatingDragged != null && dragTotalDistance > dragMoveThresholdPx) {
-            val previewSizeDp = if (floatingDragged.itemType == HomeItemType.FOLDER) 118.dp else 64.dp
+            val isExpandedFolderDrag = floatingDragged.itemType == HomeItemType.FOLDER &&
+                floatingDragged.spanX >= 2 && floatingDragged.spanY >= 2
+            val previewSizeDp = if (isExpandedFolderDrag) 118.dp else 64.dp
             val previewHalfPx = with(density) { (previewSizeDp / 2).toPx() }
             val localX = (dragFingerInRoot.x - rootBoundsInRoot.left - previewHalfPx).roundToInt()
             val localY = (dragFingerInRoot.y - rootBoundsInRoot.top - previewHalfPx).roundToInt()
@@ -1151,7 +1420,8 @@ fun HomeScreenContent(
                                 iconSizeDp = settings.homeIconSizeDp.dp,
                                 iconScale = settings.iconScale,
                                 showLabel = false,
-                                isExpanded2x2 = true,
+                                isExpanded2x2 = isExpandedFolderDrag,
+                                enableInternalLongClick = false,
                                 onClick = {},
                                 onLongClick = {}
                             )
@@ -1166,6 +1436,7 @@ fun HomeScreenContent(
                                 iconScale = settings.iconScale,
                                 iconShape = iconShape,
                                 showLabel = false,
+                                enableInternalLongClick = false,
                                 onClick = {},
                                 onLongClick = {}
                             )
@@ -1176,7 +1447,7 @@ fun HomeScreenContent(
             }
         }
 
-        // --- Opened Frosted Folder Modal ---
+        // --- Full-Screen Borderless Opened Folder View (Matching "Tools" Reference Screenshot) ---
         val activeFolder = state.openedFolder
         if (activeFolder != null) {
             FolderDetailModal(
@@ -1184,14 +1455,49 @@ fun HomeScreenContent(
                 allApps = state.installedApps,
                 notificationCounts = state.notificationCounts,
                 iconShape = iconShape,
-                onDismiss = onCloseFolder,
+                initialEditing = openFolderInEditMode,
+                onDismiss = {
+                    openFolderInEditMode = false
+                    onCloseFolder()
+                },
                 onLaunchApp = { app ->
+                    openFolderInEditMode = false
                     onCloseFolder()
                     onLaunchApp(app)
                 },
-                onToggleFolderStyle = { onToggleFolderStyle(activeFolder.id) },
-                onUpdateFolder = onUpdateFolder,
-                onDeleteFolder = onDeleteFolder
+                onExtractAppToHome = { pkg ->
+                    onExtractAppFromFolder(activeFolder.id, pkg, pagerState.currentPage)
+                    openFolderInEditMode = false
+                    onCloseFolder()
+                },
+                onOpenEditFolderSheet = {
+                    val homeFolderItem = state.homeItems.firstOrNull {
+                        it.itemType == HomeItemType.FOLDER && it.folderId == activeFolder.id
+                    }
+                    editingFolderInitial1x1 = homeFolderItem != null && homeFolderItem.spanX == 1 && homeFolderItem.spanY == 1
+                    editingFolderSheetFolderId = activeFolder.id
+                    openFolderInEditMode = false
+                    onCloseFolder()
+                },
+                onUpdateFolder = onUpdateFolder
+            )
+        }
+
+        // --- "Edit folder" Bottom Sheet Modal (Matching Xiaomi/HyperOS Reference Screenshot) ---
+        val editingSheetFolder = editingFolderSheetFolderId?.let { foldersById[it] }
+        if (editingSheetFolder != null) {
+            EditFolderBottomSheet(
+                folder = editingSheetFolder,
+                allApps = state.installedApps,
+                initialIs1x1 = editingFolderInitial1x1,
+                iconSizeDp = settings.homeIconSizeDp.dp,
+                iconScale = settings.iconScale,
+                onDismiss = { editingFolderSheetFolderId = null },
+                onConfirm = { updatedName, spanX, spanY, selectedStyle, updatedPackages ->
+                    onUpdateFolder(editingSheetFolder.id, updatedName, updatedPackages)
+                    onResizeFolder(editingSheetFolder.id, spanX, spanY, selectedStyle)
+                    editingFolderSheetFolderId = null
+                }
             )
         }
 
@@ -1311,6 +1617,46 @@ fun HomeScreenContent(
     }
 }
 
+@Composable
+private fun FolderStylePillChip(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier
+            .height(34.dp)
+            .clip(CircleShape)
+            .background(
+                if (selected) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    Color.White.copy(alpha = 0.14f)
+                }
+            )
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelMedium.copy(fontSize = 11.sp),
+            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+            color = if (selected) MaterialTheme.colorScheme.onPrimary else Color.White,
+            maxLines = 1
+        )
+    }
+}
+
+/**
+ * Full-Screen Borderless Opened Folder View matching the user's "Tools" reference screenshot:
+ * - Full-screen dimmed/blurred wallpaper backdrop with zero container card or border around the apps.
+ * - Large white left-aligned folder title ("Tools") above the first column of icons; tapping the title
+ *   enables inline renaming and optional app selection.
+ * - Spacious 3-column circular app icon grid with zero text labels under icons.
+ * - Holding and dragging any app icon outside the grid extracts it from the folder onto the Home Screen.
+ * - Tapping anywhere on the empty background closes the folder.
+ */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun FolderDetailModal(
@@ -1318,231 +1664,951 @@ private fun FolderDetailModal(
     allApps: List<AppInfo>,
     notificationCounts: Map<String, Int>,
     iconShape: IconShapeOption,
+    initialEditing: Boolean = false,
     onDismiss: () -> Unit,
     onLaunchApp: (AppInfo) -> Unit,
-    onToggleFolderStyle: () -> Unit = {},
-    onUpdateFolder: (Long, String, List<String>) -> Unit,
-    onDeleteFolder: (Long) -> Unit
+    onExtractAppToHome: (String) -> Unit = {},
+    onOpenEditFolderSheet: () -> Unit = {},
+    onUpdateFolder: (Long, String, List<String>) -> Unit
 ) {
-    var isEditing by remember { mutableStateOf(false) }
+    val haptics = LocalHapticFeedback.current
+    val view = LocalView.current
+    val density = LocalDensity.current
+
+    var isEditingTitle by remember(initialEditing) { mutableStateOf(initialEditing) }
+    var showAppSelector by remember { mutableStateOf(false) }
     var editedName by remember(folder.folderName) { mutableStateOf(folder.folderName) }
     var selectedPackages by remember(folder.memberPackages) {
         mutableStateOf(folder.memberPackages.toSet())
     }
+
+    var draggedFolderApp by remember { mutableStateOf<AppInfo?>(null) }
+    var draggedFingerOffset by remember { mutableStateOf(Offset.Zero) }
+    var draggedDistancePx by remember { mutableStateOf(0f) }
+    var modalRootBounds by remember { mutableStateOf(Rect.Zero) }
+    var gridBoundsInRoot by remember { mutableStateOf(Rect.Zero) }
+
+    val extractThresholdPx = remember(density) { with(density) { 64.dp.toPx() } }
 
     val appsMap = remember(allApps) { allApps.associateBy { it.packageName } }
     val memberApps = remember(folder.memberPackages, appsMap) {
         folder.memberPackages.mapNotNull { appsMap[it] }
     }
 
-    Dialog(onDismissRequest = onDismiss) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(
+            usePlatformDefaultWidth = false,
+            decorFitsSystemWindows = false
+        )
+    ) {
+        Box(
             modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 12.dp)
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.22f))
+                .onGloballyPositioned { modalRootBounds = it.boundsInRoot() }
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null
+                ) {
+                    if (isEditingTitle || showAppSelector) {
+                        onUpdateFolder(folder.id, editedName, selectedPackages.toList())
+                        isEditingTitle = false
+                        showAppSelector = false
+                    } else {
+                        onDismiss()
+                    }
+                }
                 .testTag("folder_detail_modal")
         ) {
-            // iOS Style Centered Folder Title Above/At Top of Folder + Style Switcher Pill
-            Row(
+            // Drag-out hint banner at top when holding & dragging an icon inside the opened folder
+            if (draggedFolderApp != null) {
+                val isOutsideGrid = gridBoundsInRoot.width > 0f &&
+                    (!gridBoundsInRoot.contains(draggedFingerOffset) || draggedDistancePx >= extractThresholdPx)
+                FrostedGlassBox(
+                    shape = CircleShape,
+                    alphaOverride = 0.62f,
+                    showBorder = false,
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(top = 56.dp, start = 24.dp, end = 24.dp)
+                ) {
+                    Text(
+                        text = if (isOutsideGrid) {
+                            "Release to place '${draggedFolderApp?.appName}' on Home Screen"
+                        } else {
+                            "Drag outside folder to move '${draggedFolderApp?.appName}' to Home Screen"
+                        },
+                        style = MaterialTheme.typography.labelLarge,
+                        color = Color.White,
+                        modifier = Modifier.padding(horizontal = 18.dp, vertical = 10.dp)
+                    )
+                }
+            }
+
+            // Center-Left Positioned Title + Spacious 3-Column Borderless Icon Grid (Matching "Tools" Screenshot)
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 8.dp, vertical = 10.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+                    .align(Alignment.Center)
+                    .padding(horizontal = 28.dp)
+                    .verticalScroll(rememberScrollState()),
+                horizontalAlignment = Alignment.Start
             ) {
-                if (isEditing) {
-                    OutlinedTextField(
-                        value = editedName,
-                        onValueChange = { editedName = it },
-                        singleLine = true,
-                        textStyle = MaterialTheme.typography.headlineSmall.copy(
-                            fontWeight = FontWeight.Bold,
-                            textAlign = TextAlign.Center,
-                            color = Color.White
-                        ),
-                        shape = RoundedCornerShape(20.dp),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = Color.White,
-                            unfocusedTextColor = Color.White,
-                            cursorColor = MaterialTheme.colorScheme.primary,
-                            focusedContainerColor = Color.White.copy(alpha = 0.16f),
-                            unfocusedContainerColor = Color.White.copy(alpha = 0.12f),
-                            focusedBorderColor = Color.Transparent,
-                            unfocusedBorderColor = Color.Transparent
-                        ),
-                        modifier = Modifier.weight(1f)
-                    )
+                // Folder Title ("Tools") — Tap Title to Rename Inline
+                if (isEditingTitle) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(start = 12.dp, end = 8.dp, bottom = 24.dp)
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null
+                            ) {},
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedTextField(
+                            value = editedName,
+                            onValueChange = { editedName = it },
+                            singleLine = true,
+                            textStyle = MaterialTheme.typography.headlineMedium.copy(
+                                fontSize = 30.sp,
+                                fontWeight = FontWeight.Normal,
+                                color = Color.White
+                            ),
+                            shape = RoundedCornerShape(20.dp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = Color.White,
+                                unfocusedTextColor = Color.White,
+                                cursorColor = Color.White,
+                                focusedContainerColor = Color.White.copy(alpha = 0.16f),
+                                unfocusedContainerColor = Color.White.copy(alpha = 0.12f),
+                                focusedBorderColor = Color.Transparent,
+                                unfocusedBorderColor = Color.Transparent
+                            ),
+                            modifier = Modifier.weight(1f)
+                        )
+
+                        FrostedGlassBox(
+                            shape = CircleShape,
+                            alphaOverride = 0.48f,
+                            showBorder = false,
+                            modifier = Modifier
+                                .height(40.dp)
+                                .clickable { showAppSelector = !showAppSelector }
+                                .testTag("folder_add_edit_apps_button")
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Add,
+                                    contentDescription = "Add or Remove Apps",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Text(
+                                    text = "Apps",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = Color.White
+                                )
+                            }
+                        }
+
+                        FrostedGlassBox(
+                            shape = CircleShape,
+                            alphaOverride = 0.48f,
+                            showBorder = false,
+                            modifier = Modifier
+                                .height(40.dp)
+                                .clickable { onOpenEditFolderSheet() }
+                                .testTag("folder_open_size_sheet_button")
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.GridView,
+                                    contentDescription = "Folder Size",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Text(
+                                    text = "Size",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = Color.White
+                                )
+                            }
+                        }
+
+                        FrostedGlassBox(
+                            shape = CircleShape,
+                            alphaOverride = 0.56f,
+                            showBorder = false,
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clickable {
+                                    onUpdateFolder(folder.id, editedName, selectedPackages.toList())
+                                    isEditingTitle = false
+                                    showAppSelector = false
+                                }
+                                .testTag("save_folder_apps_button")
+                        ) {
+                            Box(
+                                modifier = Modifier.fillMaxSize(),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Check,
+                                    contentDescription = "Save Folder",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
+                    }
                 } else {
                     Text(
                         text = folder.folderName,
-                        style = MaterialTheme.typography.headlineSmall,
-                        fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.headlineMedium.copy(
+                            fontSize = 34.sp,
+                            fontWeight = FontWeight.Normal,
+                            letterSpacing = 0.2.sp
+                        ),
                         color = Color.White,
                         textAlign = TextAlign.Start,
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier
+                            .padding(start = 20.dp, bottom = 30.dp)
+                            .clickable {
+                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                                isEditingTitle = true
+                            }
+                            .testTag("folder_title_text")
                     )
                 }
 
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    // Toggle between 2x2 Bento and 3x3 Dense Home Screen Folder Display Style
-                    FrostedGlassBox(
-                        shape = CircleShape,
-                        alphaOverride = 0.46f,
-                        showBorder = false,
+                if (!showAppSelector) {
+                    // 3-Column Floating Circular App Grid Directly Over Wallpaper (Zero Container Box, Zero App Labels)
+                    val rows = memberApps.chunked(3)
+                    Column(
                         modifier = Modifier
-                            .height(36.dp)
-                            .clickable { onToggleFolderStyle() }
-                            .testTag("toggle_folder_style_button")
+                            .fillMaxWidth()
+                            .onGloballyPositioned { gridBoundsInRoot = it.boundsInRoot() },
+                        verticalArrangement = Arrangement.spacedBy(34.dp)
                     ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.GridView,
-                                contentDescription = "Switch Folder Grid Style",
-                                tint = Color.White,
-                                modifier = Modifier.size(15.dp)
-                            )
-                            Text(
-                                text = folder.displayStyle.displayName,
-                                style = MaterialTheme.typography.labelMedium.copy(fontSize = 11.sp),
-                                color = Color.White,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                        }
-                    }
-
-                    FrostedGlassBox(
-                        shape = CircleShape,
-                        alphaOverride = 0.46f,
-                        showBorder = false,
-                        modifier = Modifier
-                            .size(36.dp)
-                            .clickable {
-                                if (isEditing) {
-                                    onUpdateFolder(folder.id, editedName, selectedPackages.toList())
-                                    isEditing = false
-                                } else {
-                                    isEditing = true
+                        for (rowApps in rows) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                for (colIdx in 0..2) {
+                                    val app = rowApps.getOrNull(colIdx)
+                                    Box(
+                                        modifier = Modifier.weight(1f),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        if (app != null) {
+                                            var iconBoundsInRoot by remember(app.packageName) { mutableStateOf(Rect.Zero) }
+                                            val isDraggingThis = draggedFolderApp?.packageName == app.packageName
+                                            Box(
+                                                modifier = Modifier
+                                                    .alpha(if (isDraggingThis) 0.28f else 1f)
+                                                    .onGloballyPositioned { iconBoundsInRoot = it.boundsInRoot() }
+                                                    .pointerInput(app.packageName) {
+                                                        detectDragGesturesAfterLongPress(
+                                                            onDragStart = { startOffset ->
+                                                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                                view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                                                                draggedFolderApp = app
+                                                                draggedDistancePx = 0f
+                                                                draggedFingerOffset = iconBoundsInRoot.topLeft + startOffset
+                                                            },
+                                                            onDrag = { change, dragAmount ->
+                                                                change.consume()
+                                                                draggedFingerOffset += dragAmount
+                                                                draggedDistancePx += dragAmount.getDistance()
+                                                            },
+                                                            onDragEnd = {
+                                                                val currentApp = draggedFolderApp
+                                                                val finalOffset = draggedFingerOffset
+                                                                val dist = draggedDistancePx
+                                                                draggedFolderApp = null
+                                                                draggedDistancePx = 0f
+                                                                if (currentApp != null) {
+                                                                    val isOutside = gridBoundsInRoot.width > 0f &&
+                                                                        (!gridBoundsInRoot.contains(finalOffset) || dist >= extractThresholdPx)
+                                                                    if (isOutside) {
+                                                                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                                                        view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                                                                        onExtractAppToHome(currentApp.packageName)
+                                                                    }
+                                                                }
+                                                            },
+                                                            onDragCancel = {
+                                                                draggedFolderApp = null
+                                                                draggedDistancePx = 0f
+                                                            }
+                                                        )
+                                                    }
+                                            ) {
+                                                LauncherAppTile(
+                                                    app = app,
+                                                    iconSizeDp = 62.dp,
+                                                    iconScale = 1.0f,
+                                                    iconShape = IconShapeOption.CIRCLE,
+                                                    showLabel = false,
+                                                    showCategoryBadge = false,
+                                                    notificationCount = notificationCounts[app.packageName] ?: 0,
+                                                    labelColor = Color.Transparent,
+                                                    enableInternalLongClick = false,
+                                                    onClick = { onLaunchApp(app) },
+                                                    onLongClick = {}
+                                                )
+                                            }
+                                        } else {
+                                            Spacer(modifier = Modifier.size(62.dp))
+                                        }
+                                    }
                                 }
                             }
-                            .testTag(if (isEditing) "save_folder_apps_button" else "folder_add_edit_apps_button")
-                    ) {
-                        Box(
-                            modifier = Modifier.fillMaxSize(),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = if (isEditing) Icons.Default.Check else Icons.Default.Add,
-                                contentDescription = if (isEditing) "Save Folder" else "Add or Edit Apps",
-                                tint = Color.White,
-                                modifier = Modifier.size(18.dp)
-                            )
                         }
                     }
-
-                    FrostedGlassBox(
-                        shape = CircleShape,
-                        alphaOverride = 0.46f,
-                        showBorder = false,
+                } else {
+                    // Optional App Picker Grid when "+ Apps" is toggled during title edit
+                    FlowRow(
                         modifier = Modifier
-                            .size(36.dp)
-                            .clickable { onDeleteFolder(folder.id) }
+                            .fillMaxWidth()
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null
+                            ) {},
+                        horizontalArrangement = Arrangement.SpaceEvenly,
+                        verticalArrangement = Arrangement.spacedBy(16.dp),
+                        maxItemsInEachRow = 4
                     ) {
-                        Box(
-                            modifier = Modifier.fillMaxSize(),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Delete,
-                                contentDescription = "Delete Folder",
-                                tint = MaterialTheme.colorScheme.error,
-                                modifier = Modifier.size(18.dp)
-                            )
+                        for (app in allApps) {
+                            val selected = app.packageName in selectedPackages
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(18.dp))
+                                    .background(
+                                        if (selected) {
+                                            MaterialTheme.colorScheme.primary.copy(alpha = 0.38f)
+                                        } else {
+                                            Color.Transparent
+                                        }
+                                    )
+                                    .padding(4.dp)
+                            ) {
+                                LauncherAppTile(
+                                    app = app,
+                                    iconSizeDp = 52.dp,
+                                    iconScale = if (selected) 1.0f else 0.86f,
+                                    iconShape = IconShapeOption.CIRCLE,
+                                    showLabel = false,
+                                    showCategoryBadge = false,
+                                    enableInternalLongClick = false,
+                                    onClick = {
+                                        selectedPackages = if (selected) {
+                                            selectedPackages - app.packageName
+                                        } else {
+                                            selectedPackages + app.packageName
+                                        }
+                                    },
+                                    onLongClick = {}
+                                )
+                            }
                         }
                     }
                 }
             }
 
-            // Authentic iOS Frosted Glass Folder Surface (3x3 Icon-Only Grid — Zero Internal Text)
-            FrostedGlassBox(
-                shape = RoundedCornerShape(38.dp),
-                alphaOverride = 0.56f,
-                showBorder = false,
-                modifier = Modifier.fillMaxWidth()
+            // Floating icon preview when dragging an app out of the opened folder
+            val activeDraggedApp = draggedFolderApp
+            if (activeDraggedApp != null) {
+                val previewHalfPx = with(density) { 34.dp.toPx() }
+                val localX = (draggedFingerOffset.x - modalRootBounds.left - previewHalfPx).roundToInt()
+                val localY = (draggedFingerOffset.y - modalRootBounds.top - previewHalfPx).roundToInt()
+                Box(
+                    modifier = Modifier
+                        .offset { IntOffset(localX, localY) }
+                        .size(68.dp)
+                        .scale(1.1f)
+                ) {
+                    LauncherAppTile(
+                        app = activeDraggedApp,
+                        iconSizeDp = 62.dp,
+                        iconScale = 1.0f,
+                        iconShape = IconShapeOption.CIRCLE,
+                        showLabel = false,
+                        enableInternalLongClick = false,
+                        onClick = {},
+                        onLongClick = {}
+                    )
+                }
+            }
+        }
+    }
+}
+
+private enum class FolderSizeSelection {
+    REGULAR_1X1,
+    ENLARGED_BENTO,
+    XXL_DENSE
+}
+
+/**
+ * "Edit folder" Bottom Sheet matching the Xiaomi/HyperOS reference screenshot:
+ * - Dark rounded bottom sheet (#242424) with top handle pill
+ * - Header row: ✕ (cancel), "Edit folder" centered title, ✓ (confirm)
+ * - Rounded folder name input pill (#383838) showing e.g. "Tools"
+ * - Purple-to-blue gradient preview banner with live LauncherFolderTile centered inside
+ * - "Size" section with 3 schematic cards: Regular (1x1), Enlarged (2x2 Bento), XXL (2x2 Dense 3x3)
+ *   highlighted with a #3B82F6 blue selection border and label
+ * - "Today's recommendations" toggle row at the bottom
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun EditFolderBottomSheet(
+    folder: FolderModel,
+    allApps: List<AppInfo>,
+    initialIs1x1: Boolean,
+    iconSizeDp: androidx.compose.ui.unit.Dp,
+    iconScale: Float,
+    onDismiss: () -> Unit,
+    onConfirm: (
+        updatedName: String,
+        spanX: Int,
+        spanY: Int,
+        displayStyle: FolderDisplayStyle,
+        updatedPackages: List<String>
+    ) -> Unit
+) {
+    var folderName by remember(folder.folderName) { mutableStateOf(folder.folderName) }
+    var selectedSize by remember(initialIs1x1, folder.displayStyle) {
+        mutableStateOf(
+            when {
+                initialIs1x1 -> FolderSizeSelection.REGULAR_1X1
+                folder.displayStyle == FolderDisplayStyle.DENSE_3X3 -> FolderSizeSelection.XXL_DENSE
+                else -> FolderSizeSelection.ENLARGED_BENTO
+            }
+        )
+    }
+    var recommendationsEnabled by remember { mutableStateOf(true) }
+    var showManageApps by remember { mutableStateOf(false) }
+    var selectedPackages by remember(folder.memberPackages) {
+        mutableStateOf(folder.memberPackages.toSet())
+    }
+
+    val appsMap = remember(allApps) { allApps.associateBy { it.packageName } }
+    val memberApps = remember(selectedPackages, appsMap) {
+        selectedPackages.mapNotNull { appsMap[it] }
+    }
+
+    val previewStyle = when (selectedSize) {
+        FolderSizeSelection.REGULAR_1X1 -> folder.displayStyle
+        FolderSizeSelection.ENLARGED_BENTO -> FolderDisplayStyle.BENTO_2X2
+        FolderSizeSelection.XXL_DENSE -> FolderDisplayStyle.DENSE_3X3
+    }
+    val previewFolder = remember(folder, folderName, previewStyle, selectedPackages) {
+        val styleSuffix = if (previewStyle == FolderDisplayStyle.DENSE_3X3) "DENSE" else "BENTO"
+        folder.copy(
+            folderName = folderName,
+            colorHex = "${folder.cleanColorHex}:$styleSuffix",
+            memberPackages = selectedPackages.toList()
+        )
+    }
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(
+            usePlatformDefaultWidth = false,
+            decorFitsSystemWindows = false
+        )
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.54f))
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null
+                ) { onDismiss() }
+                .testTag("edit_folder_bottom_sheet"),
+            contentAlignment = Alignment.BottomCenter
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp))
+                    .background(Color(0xFF242424))
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null
+                    ) {}
+                    .windowInsetsPadding(WindowInsets.navigationBars)
+                    .padding(horizontal = 20.dp, vertical = 12.dp)
+                    .verticalScroll(rememberScrollState()),
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Column(
+                // Top drag handle bar
+                Box(
+                    modifier = Modifier
+                        .padding(top = 2.dp, bottom = 12.dp)
+                        .width(42.dp)
+                        .height(4.dp)
+                        .clip(CircleShape)
+                        .background(Color(0xFF6E6E6E))
+                )
+
+                // Header row: ✕ (Close), "Edit folder", ✓ (Confirm)
+                Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 22.dp, vertical = 24.dp)
-                        .verticalScroll(rememberScrollState()),
-                    horizontalAlignment = Alignment.CenterHorizontally
+                        .padding(bottom = 18.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    if (!isEditing) {
-                        FlowRow(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceEvenly,
-                            verticalArrangement = Arrangement.spacedBy(18.dp),
-                            maxItemsInEachRow = 3
-                        ) {
-                            for (app in memberApps) {
-                                LauncherAppTile(
-                                    app = app,
-                                    iconSizeDp = 58.dp,
-                                    iconScale = 1.0f,
-                                    iconShape = iconShape,
-                                    showLabel = false,
-                                    showCategoryBadge = false,
-                                    notificationCount = notificationCounts[app.packageName] ?: 0,
-                                    labelColor = Color.Transparent,
-                                    onClick = { onLaunchApp(app) },
-                                    onLongClick = {}
-                                )
+                    IconButton(
+                        onClick = onDismiss,
+                        modifier = Modifier
+                            .size(48.dp)
+                            .testTag("edit_folder_cancel_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Cancel Edit Folder",
+                            tint = Color(0xFFD4D4D8),
+                            modifier = Modifier.size(26.dp)
+                        )
+                    }
+
+                    Text(
+                        text = "Edit folder",
+                        style = MaterialTheme.typography.titleLarge.copy(
+                            fontSize = 21.sp,
+                            fontWeight = FontWeight.Medium
+                        ),
+                        color = Color.White
+                    )
+
+                    IconButton(
+                        onClick = {
+                            val (sx, sy) = if (selectedSize == FolderSizeSelection.REGULAR_1X1) {
+                                1 to 1
+                            } else {
+                                2 to 2
+                            }
+                            onConfirm(
+                                folderName.ifBlank { folder.folderName },
+                                sx,
+                                sy,
+                                previewStyle,
+                                selectedPackages.toList()
+                            )
+                        },
+                        modifier = Modifier
+                            .size(48.dp)
+                            .testTag("edit_folder_confirm_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Check,
+                            contentDescription = "Save Folder Changes",
+                            tint = Color(0xFFD4D4D8),
+                            modifier = Modifier.size(26.dp)
+                        )
+                    }
+                }
+
+                // Folder Name Input Pill ("Tools")
+                OutlinedTextField(
+                    value = folderName,
+                    onValueChange = { folderName = it },
+                    singleLine = true,
+                    textStyle = MaterialTheme.typography.titleMedium.copy(
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Normal,
+                        color = Color.White
+                    ),
+                    shape = RoundedCornerShape(18.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White,
+                        cursorColor = Color(0xFF3B82F6),
+                        focusedContainerColor = Color(0xFF383838),
+                        unfocusedContainerColor = Color(0xFF383838),
+                        focusedBorderColor = Color.Transparent,
+                        unfocusedBorderColor = Color.Transparent
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 18.dp)
+                        .testTag("edit_folder_name_input")
+                )
+
+                // Live Purple-Blue Gradient Folder Preview Card
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(210.dp)
+                        .clip(RoundedCornerShape(24.dp))
+                        .background(
+                            Brush.linearGradient(
+                                colors = listOf(
+                                    Color(0xFFB469FF),
+                                    Color(0xFF6B5BFF),
+                                    Color(0xFF2855D8)
+                                ),
+                                start = Offset(0f, 0f),
+                                end = Offset(900f, 600f)
+                            )
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    val isExpandedPreview = selectedSize != FolderSizeSelection.REGULAR_1X1
+                    val previewBoxSize = if (isExpandedPreview) 144.dp else 82.dp
+                    Box(
+                        modifier = Modifier.size(previewBoxSize),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        LauncherFolderTile(
+                            folder = previewFolder,
+                            memberApps = memberApps,
+                            iconSizeDp = iconSizeDp,
+                            iconScale = iconScale,
+                            showLabel = false,
+                            isExpanded2x2 = isExpandedPreview,
+                            enableInternalLongClick = false,
+                            onClick = {},
+                            onLongClick = {}
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(22.dp))
+
+                // "Size" Section Header
+                Text(
+                    text = "Size",
+                    style = MaterialTheme.typography.labelLarge.copy(
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Medium
+                    ),
+                    color = Color(0xFF8E8E93),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 4.dp, bottom = 14.dp)
+                )
+
+                // 3 Visual Schematic Size Cards: Regular, Enlarged, XXL
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 24.dp),
+                    horizontalArrangement = Arrangement.SpaceEvenly,
+                    verticalAlignment = Alignment.Top
+                ) {
+                    FolderSizeSchematicOption(
+                        label = "Regular",
+                        sizeType = FolderSizeSelection.REGULAR_1X1,
+                        selected = selectedSize == FolderSizeSelection.REGULAR_1X1,
+                        onClick = { selectedSize = FolderSizeSelection.REGULAR_1X1 },
+                        testTag = "edit_folder_size_regular"
+                    )
+                    FolderSizeSchematicOption(
+                        label = "Enlarged",
+                        sizeType = FolderSizeSelection.ENLARGED_BENTO,
+                        selected = selectedSize == FolderSizeSelection.ENLARGED_BENTO,
+                        onClick = { selectedSize = FolderSizeSelection.ENLARGED_BENTO },
+                        testTag = "edit_folder_size_enlarged"
+                    )
+                    FolderSizeSchematicOption(
+                        label = "XXL",
+                        sizeType = FolderSizeSelection.XXL_DENSE,
+                        selected = selectedSize == FolderSizeSelection.XXL_DENSE,
+                        onClick = { selectedSize = FolderSizeSelection.XXL_DENSE },
+                        testTag = "edit_folder_size_xxl"
+                    )
+                }
+
+                // Subtle horizontal divider
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(1.dp)
+                        .background(Color.White.copy(alpha = 0.08f))
+                )
+
+                // "Today's recommendations" row with blue Switch
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 16.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Today's recommendations",
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            fontSize = 17.sp,
+                            fontWeight = FontWeight.Normal
+                        ),
+                        color = Color.White
+                    )
+                    Switch(
+                        checked = recommendationsEnabled,
+                        onCheckedChange = { recommendationsEnabled = it },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = Color.White,
+                            checkedTrackColor = Color(0xFF3B82F6),
+                            uncheckedThumbColor = Color(0xFFB0B0B8),
+                            uncheckedTrackColor = Color(0xFF3A3A3C)
+                        ),
+                        modifier = Modifier.testTag("edit_folder_recommendations_switch")
+                    )
+                }
+
+                // Optional expandable "Manage folder apps" row
+                TextButton(
+                    onClick = { showManageApps = !showManageApps },
+                    modifier = Modifier.testTag("edit_folder_toggle_apps_button")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Add,
+                        contentDescription = null,
+                        tint = Color(0xFF3B82F6),
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = if (showManageApps) "Hide app list" else "Add or remove folder apps (${selectedPackages.size})",
+                        color = Color(0xFF3B82F6),
+                        style = MaterialTheme.typography.labelLarge
+                    )
+                }
+
+                if (showManageApps) {
+                    FlowRow(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 8.dp, bottom = 12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        for (app in allApps) {
+                            val isSelected = app.packageName in selectedPackages
+                            FilterChip(
+                                selected = isSelected,
+                                onClick = {
+                                    selectedPackages = if (isSelected) {
+                                        selectedPackages - app.packageName
+                                    } else {
+                                        selectedPackages + app.packageName
+                                    }
+                                },
+                                label = { Text(app.appName, maxLines = 1) }
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun FolderSizeSchematicOption(
+    label: String,
+    sizeType: FolderSizeSelection,
+    selected: Boolean,
+    onClick: () -> Unit,
+    testTag: String
+) {
+    val activeBlue = Color(0xFF3B82F6)
+    val cardBg = Color(0xFF383838)
+    val dotColor = Color(0xFF68686E)
+
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onClick
+            )
+            .testTag(testTag)
+    ) {
+        // Outer selection ring
+        Box(
+            modifier = Modifier
+                .size(104.dp)
+                .then(
+                    if (selected) {
+                        Modifier.border(2.5.dp, activeBlue, RoundedCornerShape(26.dp))
+                    } else {
+                        Modifier
+                    }
+                )
+                .padding(5.dp)
+                .clip(RoundedCornerShape(21.dp))
+                .background(cardBg),
+            contentAlignment = Alignment.Center
+        ) {
+            when (sizeType) {
+                FolderSizeSelection.REGULAR_1X1 -> {
+                    // Centered 3x3 small grid schematic
+                    Column(
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        for (r in 0..2) {
+                            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                for (c in 0..2) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(9.dp)
+                                            .clip(RoundedCornerShape(3.dp))
+                                            .background(dotColor)
+                                    )
+                                }
                             }
                         }
-                    } else {
-                        FlowRow(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceEvenly,
-                            verticalArrangement = Arrangement.spacedBy(14.dp),
-                            maxItemsInEachRow = 4
-                        ) {
-                            for (app in allApps) {
-                                val selected = app.packageName in selectedPackages
-                                Box(
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(18.dp))
-                                        .background(
-                                            if (selected) {
-                                                MaterialTheme.colorScheme.primary.copy(alpha = 0.34f)
-                                            } else {
-                                                Color.Transparent
-                                            }
-                                        )
-                                        .padding(4.dp)
+                    }
+                }
+                FolderSizeSelection.ENLARGED_BENTO -> {
+                    // 2x2 Bento schematic: 3 large squares + bottom-right 2x2 mini grid
+                    Column(
+                        verticalArrangement = Arrangement.spacedBy(7.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                            Box(
+                                modifier = Modifier
+                                    .size(26.dp)
+                                    .clip(RoundedCornerShape(7.dp))
+                                    .background(dotColor)
+                            )
+                            Box(
+                                modifier = Modifier
+                                    .size(26.dp)
+                                    .clip(RoundedCornerShape(7.dp))
+                                    .background(dotColor)
+                            )
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                            Box(
+                                modifier = Modifier
+                                    .size(26.dp)
+                                    .clip(RoundedCornerShape(7.dp))
+                                    .background(dotColor)
+                            )
+                            // Bottom-right 2x2 mini squares
+                            Column(
+                                modifier = Modifier.size(26.dp),
+                                verticalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
                                 ) {
-                                    LauncherAppTile(
-                                        app = app,
-                                        iconSizeDp = 50.dp,
-                                        iconScale = if (selected) 1.0f else 0.86f,
-                                        iconShape = iconShape,
-                                        showLabel = false,
-                                        showCategoryBadge = false,
-                                        onClick = {
-                                            selectedPackages = if (selected) {
-                                                selectedPackages - app.packageName
-                                            } else {
-                                                selectedPackages + app.packageName
-                                            }
-                                        },
-                                        onLongClick = {}
+                                    Box(
+                                        modifier = Modifier
+                                            .size(11.dp)
+                                            .clip(RoundedCornerShape(3.5.dp))
+                                            .background(dotColor)
                                     )
+                                    Box(
+                                        modifier = Modifier
+                                            .size(11.dp)
+                                            .clip(RoundedCornerShape(3.5.dp))
+                                            .background(dotColor)
+                                    )
+                                }
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(11.dp)
+                                            .clip(RoundedCornerShape(3.5.dp))
+                                            .background(dotColor)
+                                    )
+                                    Box(
+                                        modifier = Modifier
+                                            .size(11.dp)
+                                            .clip(RoundedCornerShape(3.5.dp))
+                                            .background(dotColor)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+                FolderSizeSelection.XXL_DENSE -> {
+                    // 3x3 Dense schematic: 8 medium squares + 9th-slot 2x2 mini grid
+                    Column(
+                        verticalArrangement = Arrangement.spacedBy(5.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        for (r in 0..2) {
+                            Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                                for (c in 0..2) {
+                                    if (r == 2 && c == 2) {
+                                        Column(
+                                            modifier = Modifier.size(17.dp),
+                                            verticalArrangement = Arrangement.SpaceBetween
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween
+                                            ) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(7.dp)
+                                                        .clip(RoundedCornerShape(2.dp))
+                                                        .background(dotColor)
+                                                )
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(7.dp)
+                                                        .clip(RoundedCornerShape(2.dp))
+                                                        .background(dotColor)
+                                                )
+                                            }
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween
+                                            ) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(7.dp)
+                                                        .clip(RoundedCornerShape(2.dp))
+                                                        .background(dotColor)
+                                                )
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(7.dp)
+                                                        .clip(RoundedCornerShape(2.dp))
+                                                        .background(dotColor)
+                                                )
+                                            }
+                                        }
+                                    } else {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(17.dp)
+                                                .clip(RoundedCornerShape(5.dp))
+                                                .background(dotColor)
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -1550,6 +2616,17 @@ private fun FolderDetailModal(
                 }
             }
         }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodyMedium.copy(
+                fontSize = 15.sp,
+                fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal
+            ),
+            color = if (selected) activeBlue else Color.White
+        )
     }
 }
 
