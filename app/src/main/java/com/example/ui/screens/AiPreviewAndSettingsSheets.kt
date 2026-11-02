@@ -122,24 +122,93 @@ fun AiLayoutPreviewSheet(
                     )
                     Spacer(Modifier.width(8.dp))
                     Text(
-                        text = "AI Home Screen Organizer",
+                        text = "Arrange & AI Organizer",
                         style = MaterialTheme.typography.titleLarge
                     )
                 }
 
                 if (state.layoutSnapshots.isNotEmpty()) {
-                    OutlinedButton(
-                        onClick = onUndoPreviousLayout,
-                        modifier = Modifier.testTag("preview_undo_button")
+                    FrostedGlassBox(
+                        shape = RoundedCornerShape(16.dp),
+                        alphaOverride = 0.58f,
+                        modifier = Modifier
+                            .clickable(onClick = onUndoPreviousLayout)
+                            .testTag("preview_undo_button")
                     ) {
-                        Icon(Icons.Default.Undo, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text("Undo")
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(5.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Undo,
+                                contentDescription = "Undo Layout",
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Text(
+                                text = "Undo Layout",
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
                     }
                 }
             }
 
             Spacer(Modifier.height(12.dp))
+
+            // Dedicated Frosted Glass Undo Layout Card inside the Arrange Sheet
+            FrostedGlassBox(
+                shape = RoundedCornerShape(20.dp),
+                alphaOverride = 0.62f,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("arrange_undo_layout_card")
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Undo Home Screen Layout",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = if (state.layoutSnapshots.isNotEmpty()) {
+                                "${state.layoutSnapshots.size} saved layout snapshot(s) ready to restore (${state.layoutSnapshots.first().snapshotName})"
+                            } else {
+                                "Apply an AI arrangement below to automatically save a restorable layout snapshot."
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Spacer(Modifier.width(10.dp))
+                    Button(
+                        onClick = onUndoPreviousLayout,
+                        enabled = state.layoutSnapshots.isNotEmpty(),
+                        modifier = Modifier.testTag("arrange_sheet_undo_layout_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Undo,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text("Undo Layout")
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(14.dp))
 
             // Arrangement Mode Selector
             Text(

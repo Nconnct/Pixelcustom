@@ -181,8 +181,8 @@ interface LauncherDao {
     @Query("DELETE FROM icon_overrides WHERE targetPackageName = :packageName")
     suspend fun removeIconOverride(packageName: String)
 
-    // --- Search History ---
-    @Query("SELECT * FROM search_history ORDER BY timestamp DESC LIMIT 15")
+    // --- Search History (Maximum 50 searches) ---
+    @Query("SELECT * FROM search_history ORDER BY timestamp DESC LIMIT 50")
     fun observeSearchHistory(): Flow<List<SearchHistoryEntity>>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
@@ -190,6 +190,12 @@ interface LauncherDao {
 
     @Query("DELETE FROM search_history WHERE query = :query")
     suspend fun deleteSearchHistoryByQuery(query: String)
+
+    @Query(
+        "DELETE FROM search_history WHERE id NOT IN " +
+            "(SELECT id FROM search_history ORDER BY timestamp DESC LIMIT 50)"
+    )
+    suspend fun trimSearchHistoryToMax50()
 
     @Query("DELETE FROM search_history")
     suspend fun clearSearchHistory()

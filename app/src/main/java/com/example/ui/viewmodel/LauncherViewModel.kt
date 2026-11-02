@@ -631,15 +631,17 @@ class LauncherViewModel(
     }
 
     fun openEmbeddedWebSearch(queryOrUrl: String) {
+        val trimmed = queryOrUrl.trim()
+        if (trimmed.isEmpty()) return
         val settings = uiState.value.settings
         val online = searchEngine.isNetworkOnline()
-        val url = if (queryOrUrl.startsWith("http://") || queryOrUrl.startsWith("https://")) {
-            queryOrUrl
-        } else {
-            searchEngine.buildSearchEngineUrl(queryOrUrl, settings.defaultSearchEngine)
+        val url = when {
+            trimmed.startsWith("http://") || trimmed.startsWith("https://") -> trimmed
+            !trimmed.contains(" ") && trimmed.contains(".") && trimmed.length >= 4 -> "https://$trimmed"
+            else -> searchEngine.buildSearchEngineUrl(trimmed, settings.defaultSearchEngine)
         }
         viewModelScope.launch {
-            repository.recordSearchQuery(queryOrUrl, "WEB")
+            repository.recordSearchQuery(trimmed, "WEB")
         }
         _searchState.update {
             it.copy(
@@ -656,6 +658,12 @@ class LauncherViewModel(
     fun recordSearchHistory(query: String, type: String = "UNIFIED") {
         viewModelScope.launch {
             repository.recordSearchQuery(query, type)
+        }
+    }
+
+    fun deleteSearchHistoryEntry(query: String) {
+        viewModelScope.launch {
+            repository.deleteSearchHistoryEntry(query)
         }
     }
 

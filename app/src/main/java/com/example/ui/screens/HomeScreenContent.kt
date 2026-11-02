@@ -207,7 +207,7 @@ fun HomeScreenContent(
                 )
             }
 
-            // Active Move Mode Banner or Undo Layout Strip
+            // Active Move Mode Banner (Undo Layout has been moved inside the Arrange / AI Organizer sheet)
             if (movingHomeItem != null) {
                 FrostedGlassBox(
                     shape = RoundedCornerShape(16.dp),
@@ -233,42 +233,9 @@ fun HomeScreenContent(
                         }
                     }
                 }
-            } else if (state.layoutSnapshots.isNotEmpty()) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 20.dp),
-                    horizontalArrangement = Arrangement.End
-                ) {
-                    FrostedGlassBox(
-                        shape = RoundedCornerShape(14.dp),
-                        alphaOverride = 0.55f,
-                        modifier = Modifier
-                            .clickable(onClick = onUndoLayout)
-                            .testTag("home_undo_layout_chip")
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Undo,
-                                contentDescription = "Undo layout",
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(14.dp)
-                            )
-                            Text(
-                                text = "Undo Layout",
-                                style = MaterialTheme.typography.labelLarge,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                        }
-                    }
-                }
             }
 
-            // 2. Multi-Page Workspace Grid
+            // 2. Multi-Page Workspace Grid with Adaptive iOS-Style Bento Folders
             HorizontalPager(
                 state = pagerState,
                 modifier = Modifier
@@ -282,12 +249,17 @@ fun HomeScreenContent(
                 val widgetsOnPage = remember(pageItems) {
                     pageItems.filter { it.itemType == HomeItemType.WIDGET }
                 }
+                val nonWidgetItems = remember(pageItems) {
+                    pageItems
+                        .filter { it.itemType != HomeItemType.WIDGET }
+                        .sortedWith(compareBy<HomeScreenItemModel> { it.row }.thenBy { it.column })
+                }
 
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(horizontal = 12.dp, vertical = 4.dp),
-                    verticalArrangement = Arrangement.SpaceEvenly
+                    verticalArrangement = Arrangement.SpaceBetween
                 ) {
                     for (widgetItem in widgetsOnPage) {
                         FrostedGlassBox(
@@ -352,103 +324,145 @@ fun HomeScreenContent(
                         }
                     }
 
-                    val startRow = if (pageIndex == 0 && settings.showAtAGlanceWidget) 1 else 0
-                    for (r in startRow until settings.homeGridRows) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .weight(1f),
-                            horizontalArrangement = Arrangement.SpaceEvenly,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            for (c in 0 until settings.homeGridColumns) {
-                                val cellItem = pageItems.firstOrNull {
-                                    it.row == r && it.column == c && it.itemType != HomeItemType.WIDGET
-                                }
-
-                                Box(
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .fillMaxSize()
-                                        .padding(2.dp)
-                                        .then(
-                                            if (movingHomeItem != null) {
-                                                Modifier
-                                                    .clip(RoundedCornerShape(14.dp))
-                                                    .border(
-                                                        1.dp,
-                                                        MaterialTheme.colorScheme.primary.copy(alpha = 0.6f),
-                                                        RoundedCornerShape(14.dp)
-                                                    )
-                                                    .clickable {
-                                                        onMoveHomeItem(movingHomeItem.id, pageIndex, r, c, false)
-                                                        onCancelMoveMode()
-                                                    }
-                                            } else {
-                                                Modifier
-                                            }
-                                        ),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    when (cellItem?.itemType) {
-                                        HomeItemType.APP_SHORTCUT -> {
-                                            val app = cellItem.packageName?.let { appsByPkg[it] }
-                                            if (app != null) {
-                                                val appUnread = state.notificationCounts[app.packageName] ?: 0
-                                                LauncherAppTile(
-                                                    app = app,
-                                                    iconSizeDp = settings.homeIconSizeDp.dp,
-                                                    iconScale = settings.iconScale,
-                                                    iconShape = iconShape,
-                                                    showLabel = settings.showHomeIconLabels,
-                                                    notificationCount = appUnread,
-                                                    labelColor = Color.White,
-                                                    onClick = {
-                                                        if (movingHomeItem != null) {
-                                                            onMoveHomeItem(movingHomeItem.id, pageIndex, r, c, false)
-                                                            onCancelMoveMode()
-                                                        } else {
-                                                            onLaunchApp(app)
-                                                        }
-                                                    },
-                                                    onLongClick = {
-                                                        onOpenAppContextMenu(app, cellItem)
-                                                    }
-                                                )
-                                            }
-                                        }
-
-                                        HomeItemType.FOLDER -> {
-                                            val folder = cellItem.folderId?.let { foldersById[it] }
-                                            if (folder != null) {
-                                                val memberApps = folder.memberPackages.mapNotNull { appsByPkg[it] }
-                                                val folderUnreadCount = LauncherNotificationListenerService.computeFolderUnreadCount(
-                                                    memberPackages = folder.memberPackages,
-                                                    countsByPackage = state.notificationCounts
-                                                )
-                                                LauncherFolderTile(
-                                                    folder = folder,
-                                                    memberApps = memberApps,
-                                                    iconSizeDp = settings.homeIconSizeDp.dp,
-                                                    showLabel = settings.showHomeIconLabels,
-                                                    unreadNotificationCount = folderUnreadCount,
-                                                    onClick = {
-                                                        if (movingHomeItem != null) {
-                                                            onMoveHomeItem(movingHomeItem.id, pageIndex, r, c, false)
-                                                            onCancelMoveMode()
-                                                        } else {
-                                                            onOpenFolder(folder.id)
-                                                        }
-                                                    },
-                                                    onLongClick = {
-                                                        onOpenFolder(folder.id)
-                                                    }
-                                                )
-                                            }
-                                        }
-
-                                        else -> Unit
+                    if (movingHomeItem != null) {
+                        val startRow = if (pageIndex == 0 && settings.showAtAGlanceWidget) 1 else 0
+                        for (r in startRow until settings.homeGridRows) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .weight(1f),
+                                horizontalArrangement = Arrangement.SpaceEvenly,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                for (c in 0 until settings.homeGridColumns) {
+                                    val cellItem = pageItems.firstOrNull {
+                                        it.row == r && it.column == c && it.itemType != HomeItemType.WIDGET
                                     }
+
+                                    Box(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .fillMaxSize()
+                                            .padding(2.dp)
+                                            .clip(RoundedCornerShape(14.dp))
+                                            .border(
+                                                1.dp,
+                                                MaterialTheme.colorScheme.primary.copy(alpha = 0.6f),
+                                                RoundedCornerShape(14.dp)
+                                            )
+                                            .clickable {
+                                                onMoveHomeItem(movingHomeItem.id, pageIndex, r, c, false)
+                                                onCancelMoveMode()
+                                            },
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        when (cellItem?.itemType) {
+                                            HomeItemType.APP_SHORTCUT -> {
+                                                val app = cellItem.packageName?.let { appsByPkg[it] }
+                                                if (app != null) {
+                                                    val appUnread = state.notificationCounts[app.packageName] ?: 0
+                                                    LauncherAppTile(
+                                                        app = app,
+                                                        iconSizeDp = settings.homeIconSizeDp.dp,
+                                                        iconScale = settings.iconScale,
+                                                        iconShape = iconShape,
+                                                        showLabel = settings.showHomeIconLabels,
+                                                        notificationCount = appUnread,
+                                                        labelColor = Color.White,
+                                                        onClick = {
+                                                            onMoveHomeItem(movingHomeItem.id, pageIndex, r, c, false)
+                                                            onCancelMoveMode()
+                                                        },
+                                                        onLongClick = {}
+                                                    )
+                                                }
+                                            }
+
+                                            HomeItemType.FOLDER -> {
+                                                val folder = cellItem.folderId?.let { foldersById[it] }
+                                                if (folder != null) {
+                                                    val memberApps = folder.memberPackages.mapNotNull { appsByPkg[it] }
+                                                    val folderUnreadCount = LauncherNotificationListenerService.computeFolderUnreadCount(
+                                                        memberPackages = folder.memberPackages,
+                                                        countsByPackage = state.notificationCounts
+                                                    )
+                                                    LauncherFolderTile(
+                                                        folder = folder,
+                                                        memberApps = memberApps,
+                                                        iconSizeDp = settings.homeIconSizeDp.dp,
+                                                        showLabel = settings.showHomeIconLabels,
+                                                        unreadNotificationCount = folderUnreadCount,
+                                                        onClick = {
+                                                            onMoveHomeItem(movingHomeItem.id, pageIndex, r, c, false)
+                                                            onCancelMoveMode()
+                                                        },
+                                                        onLongClick = {},
+                                                        onLaunchApp = onLaunchApp
+                                                    )
+                                                }
+                                            }
+
+                                            else -> Unit
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        // Adaptive iOS-Style Bento Flow Layout:
+                        // Folders with more apps (4..5 or 6+) automatically expand into wider & taller iOS App Library pods,
+                        // while folders with fewer apps (1..3) stay compact. Adding apps to a folder dynamically grows it!
+                        @OptIn(ExperimentalLayoutApi::class)
+                        FlowRow(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .verticalScroll(rememberScrollState())
+                                .padding(vertical = 6.dp),
+                            horizontalArrangement = Arrangement.SpaceEvenly,
+                            verticalArrangement = Arrangement.spacedBy(14.dp)
+                        ) {
+                            for (cellItem in nonWidgetItems) {
+                                when (cellItem.itemType) {
+                                    HomeItemType.FOLDER -> {
+                                        val folder = cellItem.folderId?.let { foldersById[it] }
+                                        if (folder != null) {
+                                            val memberApps = folder.memberPackages.mapNotNull { appsByPkg[it] }
+                                            val folderUnreadCount = LauncherNotificationListenerService.computeFolderUnreadCount(
+                                                memberPackages = folder.memberPackages,
+                                                countsByPackage = state.notificationCounts
+                                            )
+                                            LauncherFolderTile(
+                                                folder = folder,
+                                                memberApps = memberApps,
+                                                iconSizeDp = settings.homeIconSizeDp.dp,
+                                                showLabel = settings.showHomeIconLabels,
+                                                unreadNotificationCount = folderUnreadCount,
+                                                onClick = { onOpenFolder(folder.id) },
+                                                onLongClick = { onOpenFolder(folder.id) },
+                                                onLaunchApp = onLaunchApp
+                                            )
+                                        }
+                                    }
+
+                                    HomeItemType.APP_SHORTCUT -> {
+                                        val app = cellItem.packageName?.let { appsByPkg[it] }
+                                        if (app != null) {
+                                            val appUnread = state.notificationCounts[app.packageName] ?: 0
+                                            LauncherAppTile(
+                                                app = app,
+                                                iconSizeDp = settings.homeIconSizeDp.dp,
+                                                iconScale = settings.iconScale,
+                                                iconShape = iconShape,
+                                                showLabel = settings.showHomeIconLabels,
+                                                notificationCount = appUnread,
+                                                labelColor = Color.White,
+                                                onClick = { onLaunchApp(app) },
+                                                onLongClick = { onOpenAppContextMenu(app, cellItem) }
+                                            )
+                                        }
+                                    }
+
+                                    else -> Unit
                                 }
                             }
                         }
@@ -620,13 +634,28 @@ fun HomeScreenContent(
             )
         }
 
-        // --- Empty Workspace Long-Press Action Menu ---
+        // --- Empty Workspace Long-Press Frosted Glass Action Menu ---
         if (showHomeLongPressDialog) {
-            AlertDialog(
-                onDismissRequest = { showHomeLongPressDialog = false },
-                title = { Text("Home Screen Options") },
-                text = {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Dialog(onDismissRequest = { showHomeLongPressDialog = false }) {
+                FrostedGlassBox(
+                    shape = RoundedCornerShape(28.dp),
+                    alphaOverride = 0.78f,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(8.dp)
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(20.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Text(
+                            text = "Home Screen Options",
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
                         if (!state.isDefaultHomeLauncher) {
                             Button(
                                 onClick = {
@@ -653,7 +682,7 @@ fun HomeScreenContent(
                         ) {
                             Icon(Icons.Default.AutoAwesome, contentDescription = null)
                             Spacer(Modifier.width(8.dp))
-                            Text("AI Auto-Arrange Home Screen")
+                            Text("AI Auto-Arrange & Undo Layout")
                         }
                         OutlinedButton(
                             onClick = {
@@ -666,7 +695,7 @@ fun HomeScreenContent(
                         ) {
                             Icon(Icons.Default.CreateNewFolder, contentDescription = null)
                             Spacer(Modifier.width(8.dp))
-                            Text("Create New Smart Folder")
+                            Text("Create Adaptive iOS Smart Folder")
                         }
                         OutlinedButton(
                             onClick = {
@@ -692,16 +721,19 @@ fun HomeScreenContent(
                         ) {
                             Icon(Icons.Default.Edit, contentDescription = null)
                             Spacer(Modifier.width(8.dp))
-                            Text("Home & Launcher Settings")
+                            Text("Home & Glass Settings")
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.End
+                        ) {
+                            TextButton(onClick = { showHomeLongPressDialog = false }) {
+                                Text("Close")
+                            }
                         }
                     }
-                },
-                confirmButton = {
-                    TextButton(onClick = { showHomeLongPressDialog = false }) {
-                        Text("Close")
-                    }
                 }
-            )
+            }
         }
 
         if (showCreateFolderDialog) {
@@ -740,11 +772,19 @@ private fun FolderDetailModal(
     val memberApps = remember(folder.memberPackages, appsMap) {
         folder.memberPackages.mapNotNull { appsMap[it] }
     }
+    val tierDescription = remember(selectedPackages.size, memberApps.size) {
+        val count = if (isEditing) selectedPackages.size else memberApps.size
+        when {
+            count >= 6 -> "Large iOS App Library Folder • $count apps"
+            count >= 4 -> "Medium Expanded iOS Folder • $count apps"
+            else -> "Compact iOS Folder • $count apps"
+        }
+    }
 
     Dialog(onDismissRequest = onDismiss) {
         FrostedGlassBox(
-            shape = RoundedCornerShape(28.dp),
-            alphaOverride = 0.88f,
+            shape = RoundedCornerShape(32.dp),
+            alphaOverride = 0.78f,
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(8.dp)
@@ -770,19 +810,45 @@ private fun FolderDetailModal(
                             modifier = Modifier.weight(1f)
                         )
                     } else {
-                        Text(
-                            text = folder.folderName,
-                            style = MaterialTheme.typography.titleLarge,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                    }
-                    Row {
-                        IconButton(onClick = { isEditing = !isEditing }) {
-                            Icon(
-                                imageVector = Icons.Default.Edit,
-                                contentDescription = "Edit Folder",
-                                tint = MaterialTheme.colorScheme.primary
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = folder.folderName,
+                                style = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface
                             )
+                            Text(
+                                text = tierDescription,
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        FrostedGlassBox(
+                            shape = RoundedCornerShape(16.dp),
+                            alphaOverride = 0.55f,
+                            modifier = Modifier
+                                .clickable { isEditing = !isEditing }
+                                .testTag("folder_add_edit_apps_button")
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Icon(
+                                    imageVector = if (isEditing) Icons.Default.Close else Icons.Default.Add,
+                                    contentDescription = "Add or Edit Apps",
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Text(
+                                    text = if (isEditing) "Cancel" else "Add Apps",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
                         }
                         IconButton(onClick = { onDeleteFolder(folder.id) }) {
                             Icon(
@@ -794,19 +860,19 @@ private fun FolderDetailModal(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(12.dp))
+                Spacer(modifier = Modifier.height(14.dp))
 
                 if (!isEditing) {
                     FlowRow(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceEvenly,
-                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(14.dp),
                         maxItemsInEachRow = 3
                     ) {
                         for (app in memberApps) {
                             LauncherAppTile(
                                 app = app,
-                                iconSizeDp = 52.dp,
+                                iconSizeDp = 54.dp,
                                 iconScale = 1.0f,
                                 iconShape = iconShape,
                                 showLabel = true,
@@ -819,7 +885,7 @@ private fun FolderDetailModal(
                     }
                 } else {
                     Text(
-                        text = "Select apps in this folder:",
+                        text = "Select apps (4+ apps expands folder to Medium, 6+ apps expands to Large iOS Bento):",
                         style = MaterialTheme.typography.labelLarge,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -849,9 +915,11 @@ private fun FolderDetailModal(
                             onUpdateFolder(folder.id, editedName, selectedPackages.toList())
                             isEditing = false
                         },
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("save_folder_apps_button")
                     ) {
-                        Text("Save Folder")
+                        Text("Save & Resize Folder (${selectedPackages.size} apps)")
                     }
                 }
             }
@@ -869,14 +937,30 @@ private fun CreateFolderModal(
 ) {
     var folderName by remember { mutableStateOf("Smart Folder") }
     var chosenPackages by remember {
-        mutableStateOf(allApps.take(3).map { it.packageName }.toSet())
+        mutableStateOf(allApps.take(4).map { it.packageName }.toSet())
     }
 
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Create Folder on Page ${currentPage + 1}") },
-        text = {
-            Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+    Dialog(onDismissRequest = onDismiss) {
+        FrostedGlassBox(
+            shape = RoundedCornerShape(30.dp),
+            alphaOverride = 0.80f,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(8.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(20.dp)
+                    .verticalScroll(rememberScrollState())
+            ) {
+                Text(
+                    text = "Create Adaptive iOS Folder (Page ${currentPage + 1})",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Spacer(modifier = Modifier.height(8.dp))
                 OutlinedTextField(
                     value = folderName,
                     onValueChange = { folderName = it },
@@ -885,7 +969,11 @@ private fun CreateFolderModal(
                     modifier = Modifier.fillMaxWidth()
                 )
                 Spacer(modifier = Modifier.height(10.dp))
-                Text("Choose member apps:", style = MaterialTheme.typography.labelLarge)
+                Text(
+                    text = "Choose member apps (${chosenPackages.size} selected — 4+ makes a bigger folder):",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
                 Spacer(modifier = Modifier.height(6.dp))
                 FlowRow(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -906,20 +994,23 @@ private fun CreateFolderModal(
                         )
                     }
                 }
+                Spacer(modifier = Modifier.height(14.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    TextButton(onClick = onDismiss) { Text("Cancel") }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Button(
+                        onClick = { onCreate(folderName, chosenPackages.toList()) },
+                        enabled = chosenPackages.isNotEmpty()
+                    ) {
+                        Text("Create Folder")
+                    }
+                }
             }
-        },
-        confirmButton = {
-            Button(
-                onClick = { onCreate(folderName, chosenPackages.toList()) },
-                enabled = chosenPackages.isNotEmpty()
-            ) {
-                Text("Create Folder")
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
         }
-    )
+    }
 }
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -942,38 +1033,48 @@ fun AppLongPressContextDialog(
     var customIconDrawable by remember(app.customIconKey) { mutableStateOf(app.customIconKey.orEmpty()) }
     var showCustomizeFields by remember { mutableStateOf(false) }
 
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(app.appName, fontWeight = FontWeight.Bold)
-                    Text(
-                        text = "${app.categoryName} • AI Confidence ${(app.categoryConfidence * 100).toInt()}%",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                }
-                IconButton(onClick = onToggleFavorite) {
-                    Icon(
-                        imageVector = if (app.isFavorite) Icons.Default.Star else Icons.Default.StarBorder,
-                        contentDescription = "Toggle Favorite",
-                        tint = if (app.isFavorite) Color(0xFFFBBC04) else MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-        },
-        text = {
+    Dialog(onDismissRequest = onDismiss) {
+        FrostedGlassBox(
+            shape = RoundedCornerShape(30.dp),
+            alphaOverride = 0.80f,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(8.dp)
+        ) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .padding(20.dp)
                     .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = app.appName,
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = "${app.categoryName} • AI Confidence ${(app.categoryConfidence * 100).toInt()}%",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                    IconButton(onClick = onToggleFavorite) {
+                        Icon(
+                            imageVector = if (app.isFavorite) Icons.Default.Star else Icons.Default.StarBorder,
+                            contentDescription = "Toggle Favorite",
+                            tint = if (app.isFavorite) Color(0xFFFBBC04) else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -1113,12 +1214,16 @@ fun AppLongPressContextDialog(
                         )
                     }
                 }
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Done")
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    TextButton(onClick = onDismiss) {
+                        Text("Done")
+                    }
+                }
             }
         }
-    )
+    }
 }

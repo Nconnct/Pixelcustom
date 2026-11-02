@@ -111,9 +111,15 @@ import com.example.ui.viewmodel.LauncherUiState
 import com.example.ui.viewmodel.SearchUiState
 import kotlin.math.roundToInt
 
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.ui.graphics.Color
+
 private const val SEARCH_DISMISS_DRAG_THRESHOLD_PX = 95f
 private const val SEARCH_DISMISS_FLING_VELOCITY = 520f
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun UnifiedSearchSheet(
     launcherState: LauncherUiState,
@@ -126,6 +132,7 @@ fun UnifiedSearchSheet(
     onOpenWebUrl: (String) -> Unit,
     onCloseWebView: () -> Unit,
     onClearHistory: () -> Unit,
+    onDeleteHistoryEntry: (String) -> Unit = {},
     onRecordHistory: (String, String) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -141,6 +148,8 @@ fun UnifiedSearchSheet(
 
     // Immediate local text state so typing is 100% lag-free and never drops characters
     var localQuery by remember { mutableStateOf(searchState.query) }
+    var showAllHistory by remember { mutableStateOf(false) }
+
     LaunchedEffect(searchState.query) {
         if (localQuery != searchState.query) {
             localQuery = searchState.query
@@ -265,7 +274,7 @@ fun UnifiedSearchSheet(
     }
 
     FrostedGlassPageSurface(
-        alphaMultiplier = if (searchState.activeWebViewUrl != null) 0.56f else 0.68f,
+        alphaMultiplier = if (searchState.activeWebViewUrl != null) 0.44f else 0.62f,
         modifier = modifier
             .fillMaxSize()
             .offset { IntOffset(0, animatedDragOffsetY.roundToInt().coerceAtLeast(0)) }
@@ -279,7 +288,7 @@ fun UnifiedSearchSheet(
                 .windowInsetsPadding(WindowInsets.navigationBars)
                 .padding(top = 6.dp)
         ) {
-            // Top Swipe-Down Handle & Unified Search Input Bar
+            // Top Swipe-Down Handle & Frosted Glass Unified Search Input Bar
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -343,99 +352,132 @@ fun UnifiedSearchSheet(
 
                 Spacer(modifier = Modifier.height(4.dp))
 
-                Row(
+                FrostedGlassBox(
+                    shape = RoundedCornerShape(28.dp),
+                    alphaOverride = 0.52f,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 14.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        .padding(horizontal = 14.dp)
                 ) {
-                    IconButton(
-                        onClick = {
-                            if (searchState.activeWebViewUrl != null) {
-                                onCloseWebView()
-                            } else {
-                                closeSearchAndClear()
-                            }
-                        },
-                        modifier = Modifier.testTag("unified_search_back_button")
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 6.dp, vertical = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Back",
-                            tint = MaterialTheme.colorScheme.onSurface
+                        IconButton(
+                            onClick = {
+                                if (searchState.activeWebViewUrl != null) {
+                                    onCloseWebView()
+                                } else {
+                                    closeSearchAndClear()
+                                }
+                            },
+                            modifier = Modifier.testTag("unified_search_back_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = "Back",
+                                tint = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+
+                        OutlinedTextField(
+                            value = localQuery,
+                            onValueChange = { newText ->
+                                localQuery = newText
+                                onQueryChange(newText)
+                            },
+                            placeholder = {
+                                Text(
+                                    text = stringResource(R.string.search_hint),
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            },
+                            leadingIcon = {
+                                Icon(
+                                    imageVector = Icons.Default.Search,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                            },
+                            trailingIcon = {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    if (localQuery.isNotEmpty() && searchState.isOnline) {
+                                        IconButton(
+                                            onClick = {
+                                                val submitted = localQuery.trim()
+                                                if (submitted.isNotEmpty()) {
+                                                    keyboardController?.hide()
+                                                    onRecordHistory(submitted, "WEB")
+                                                    onOpenWebUrl(submitted)
+                                                }
+                                            },
+                                            modifier = Modifier.testTag("search_bar_browse_web_button")
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Public,
+                                                contentDescription = "Browse Web in Glass View",
+                                                tint = MaterialTheme.colorScheme.primary
+                                            )
+                                        }
+                                    }
+                                    if (localQuery.isNotEmpty()) {
+                                        IconButton(
+                                            onClick = {
+                                                localQuery = ""
+                                                onQueryChange("")
+                                            }
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Clear,
+                                                contentDescription = "Clear search",
+                                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                    }
+                                }
+                            },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                            keyboardActions = KeyboardActions(
+                                onSearch = {
+                                    if (localQuery.isNotBlank()) {
+                                        val submittedQuery = localQuery.trim()
+                                        keyboardController?.hide()
+                                        onRecordHistory(submittedQuery, "UNIFIED")
+                                        if (searchState.activeWebViewUrl != null && searchState.isOnline) {
+                                            onOpenWebUrl(submittedQuery)
+                                        } else {
+                                            val topApp = searchState.appResults.firstOrNull()
+                                            if (topApp != null && !submittedQuery.contains(".")) {
+                                                localQuery = ""
+                                                onQueryChange("")
+                                                onLaunchApp(topApp)
+                                            } else if (searchState.isOnline) {
+                                                onOpenWebUrl(submittedQuery)
+                                            }
+                                        }
+                                    }
+                                }
+                            ),
+                            shape = RoundedCornerShape(24.dp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                                unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
+                                cursorColor = MaterialTheme.colorScheme.primary,
+                                focusedContainerColor = Color.Transparent,
+                                unfocusedContainerColor = Color.Transparent,
+                                focusedBorderColor = Color.Transparent,
+                                unfocusedBorderColor = Color.Transparent
+                            ),
+                            modifier = Modifier
+                                .weight(1f)
+                                .focusRequester(focusRequester)
+                                .testTag("unified_search_input")
                         )
                     }
-
-                    OutlinedTextField(
-                        value = localQuery,
-                        onValueChange = { newText ->
-                            localQuery = newText
-                            onQueryChange(newText)
-                        },
-                        placeholder = {
-                            Text(
-                                text = stringResource(R.string.search_hint),
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        },
-                        leadingIcon = {
-                            Icon(
-                                imageVector = Icons.Default.Search,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary
-                            )
-                        },
-                        trailingIcon = {
-                            if (localQuery.isNotEmpty()) {
-                                IconButton(
-                                    onClick = {
-                                        localQuery = ""
-                                        onQueryChange("")
-                                    }
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Clear,
-                                        contentDescription = "Clear search",
-                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                            }
-                        },
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                        keyboardActions = KeyboardActions(
-                            onSearch = {
-                                if (localQuery.isNotBlank()) {
-                                    val submittedQuery = localQuery
-                                    keyboardController?.hide()
-                                    onRecordHistory(submittedQuery, "UNIFIED")
-                                    val topApp = searchState.appResults.firstOrNull()
-                                    if (topApp != null && searchState.activeWebViewUrl == null) {
-                                        localQuery = ""
-                                        onQueryChange("")
-                                        onLaunchApp(topApp)
-                                    } else if (searchState.isOnline) {
-                                        onOpenWebUrl(submittedQuery)
-                                    }
-                                }
-                            }
-                        ),
-                        shape = RoundedCornerShape(26.dp),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = MaterialTheme.colorScheme.onSurface,
-                            unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
-                            cursorColor = MaterialTheme.colorScheme.primary,
-                            focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.52f),
-                            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.36f),
-                            focusedBorderColor = MaterialTheme.colorScheme.primary,
-                            unfocusedBorderColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.20f)
-                        ),
-                        modifier = Modifier
-                            .weight(1f)
-                            .focusRequester(focusRequester)
-                            .testTag("unified_search_input")
-                    )
                 }
             }
 
@@ -468,6 +510,11 @@ fun UnifiedSearchSheet(
                 EmbeddedSecureSearchWebView(
                     url = activeUrl,
                     isOnline = searchState.isOnline,
+                    onNavigateQueryOrUrl = { newQueryOrUrl ->
+                        localQuery = newQueryOrUrl
+                        onRecordHistory(newQueryOrUrl, "WEB")
+                        onOpenWebUrl(newQueryOrUrl)
+                    },
                     onClose = onCloseWebView,
                     onExitSearchCompletely = closeSearchAndClear,
                     onOpenExternal = {
@@ -492,49 +539,118 @@ fun UnifiedSearchSheet(
                         .fillMaxWidth()
                         .testTag("unified_search_results_list")
                 ) {
-                    // Section F: Recent Search History (when settled query is blank)
+                    // Section F: Recent Search History (up to 50 searches stored & managed)
                     if (launcherState.searchHistory.isNotEmpty() && settledQuery.isBlank()) {
                         item(key = "section_recent_history") {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
+                            FrostedGlassBox(
+                                shape = RoundedCornerShape(22.dp),
+                                alphaOverride = 0.48f,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("search_history_section_card")
                             ) {
-                                Text(
-                                    text = "Recent Searches",
-                                    style = MaterialTheme.typography.titleMedium,
-                                    color = MaterialTheme.colorScheme.primary
-                                )
-                                TextButton(onClick = onClearHistory) {
-                                    Text("Clear")
-                                }
-                            }
-                            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                items(launcherState.searchHistory, key = { it.id }) { entry ->
-                                    FrostedGlassBox(
-                                        shape = RoundedCornerShape(16.dp),
-                                        alphaOverride = 0.6f,
-                                        modifier = Modifier.clickable {
-                                            localQuery = entry.query
-                                            onQueryChange(entry.query)
-                                        }
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(14.dp)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         Row(
-                                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
                                             verticalAlignment = Alignment.CenterVertically,
                                             horizontalArrangement = Arrangement.spacedBy(6.dp)
                                         ) {
                                             Icon(
                                                 imageVector = Icons.Default.History,
                                                 contentDescription = null,
-                                                modifier = Modifier.size(15.dp),
-                                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                                tint = MaterialTheme.colorScheme.primary,
+                                                modifier = Modifier.size(18.dp)
                                             )
                                             Text(
-                                                text = entry.query,
-                                                style = MaterialTheme.typography.bodyMedium,
-                                                color = MaterialTheme.colorScheme.onSurface
+                                                text = "Search History (${launcherState.searchHistory.size}/50)",
+                                                style = MaterialTheme.typography.titleMedium,
+                                                color = MaterialTheme.colorScheme.primary
                                             )
+                                        }
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            if (launcherState.searchHistory.size > 6) {
+                                                TextButton(
+                                                    onClick = { showAllHistory = !showAllHistory },
+                                                    modifier = Modifier.testTag("toggle_expand_history_button")
+                                                ) {
+                                                    Text(if (showAllHistory) "Show Less" else "Show All (${launcherState.searchHistory.size})")
+                                                }
+                                            }
+                                            TextButton(
+                                                onClick = onClearHistory,
+                                                modifier = Modifier.testTag("clear_search_history_button")
+                                            ) {
+                                                Text("Clear All")
+                                            }
+                                        }
+                                    }
+
+                                    Spacer(modifier = Modifier.height(6.dp))
+
+                                    val visibleHistory = if (showAllHistory) {
+                                        launcherState.searchHistory.take(50)
+                                    } else {
+                                        launcherState.searchHistory.take(12)
+                                    }
+
+                                    FlowRow(
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        for (entry in visibleHistory) {
+                                            FrostedGlassBox(
+                                                shape = RoundedCornerShape(16.dp),
+                                                alphaOverride = 0.56f,
+                                                modifier = Modifier
+                                                    .clickable {
+                                                        localQuery = entry.query
+                                                        onQueryChange(entry.query)
+                                                        if (entry.searchType == "WEB" && searchState.isOnline) {
+                                                            onOpenWebUrl(entry.query)
+                                                        }
+                                                    }
+                                                    .testTag("history_chip_${entry.query}")
+                                            ) {
+                                                Row(
+                                                    modifier = Modifier.padding(start = 10.dp, end = 6.dp, top = 6.dp, bottom = 6.dp),
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                                ) {
+                                                    Icon(
+                                                        imageVector = if (entry.searchType == "WEB") Icons.Default.Public else Icons.Default.History,
+                                                        contentDescription = null,
+                                                        modifier = Modifier.size(14.dp),
+                                                        tint = MaterialTheme.colorScheme.primary
+                                                    )
+                                                    Text(
+                                                        text = entry.query,
+                                                        style = MaterialTheme.typography.bodyMedium,
+                                                        color = MaterialTheme.colorScheme.onSurface,
+                                                        maxLines = 1
+                                                    )
+                                                    Icon(
+                                                        imageVector = Icons.Default.Close,
+                                                        contentDescription = "Remove ${entry.query} from history",
+                                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                        modifier = Modifier
+                                                            .size(16.dp)
+                                                            .clip(CircleShape)
+                                                            .clickable {
+                                                                onDeleteHistoryEntry(entry.query)
+                                                            }
+                                                            .testTag("delete_history_${entry.query}")
+                                                    )
+                                                }
+                                            }
                                         }
                                     }
                                 }
@@ -544,43 +660,51 @@ fun UnifiedSearchSheet(
 
                     // Section A: Applications
                     item(key = "section_apps") {
-                        Text(
-                            text = if (settledQuery.isBlank()) {
-                                "Suggested Apps"
-                            } else {
-                                "Apps (${searchState.appResults.size})"
-                            },
-                            style = MaterialTheme.typography.titleMedium,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        if (searchState.appResults.isEmpty()) {
-                            Text(
-                                text = "No matching installed applications",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        } else {
-                            LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                                items(searchState.appResults, key = { it.packageName }) { app ->
-                                    LauncherAppTile(
-                                        app = app,
-                                        iconSizeDp = 52.dp,
-                                        iconScale = settings.iconScale,
-                                        iconShape = iconShape,
-                                        showLabel = true,
-                                        showCategoryBadge = false,
-                                        labelColor = MaterialTheme.colorScheme.onSurface,
-                                        onClick = {
-                                            if (settledQuery.isNotBlank()) {
-                                                onRecordHistory(settledQuery, "APP")
-                                            }
-                                            localQuery = ""
-                                            onQueryChange("")
-                                            onLaunchApp(app)
-                                        },
-                                        onLongClick = { onLongPressApp(app) }
+                        FrostedGlassBox(
+                            shape = RoundedCornerShape(22.dp),
+                            alphaOverride = 0.46f,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(14.dp)) {
+                                Text(
+                                    text = if (settledQuery.isBlank()) {
+                                        "Suggested Apps"
+                                    } else {
+                                        "Apps (${searchState.appResults.size})"
+                                    },
+                                    style = MaterialTheme.typography.titleMedium,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
+                                if (searchState.appResults.isEmpty()) {
+                                    Text(
+                                        text = "No matching installed applications",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
+                                } else {
+                                    LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                        items(searchState.appResults, key = { it.packageName }) { app ->
+                                            LauncherAppTile(
+                                                app = app,
+                                                iconSizeDp = 52.dp,
+                                                iconScale = settings.iconScale,
+                                                iconShape = iconShape,
+                                                showLabel = true,
+                                                showCategoryBadge = false,
+                                                labelColor = MaterialTheme.colorScheme.onSurface,
+                                                onClick = {
+                                                    if (settledQuery.isNotBlank()) {
+                                                        onRecordHistory(settledQuery, "APP")
+                                                    }
+                                                    localQuery = ""
+                                                    onQueryChange("")
+                                                    onLaunchApp(app)
+                                                },
+                                                onLongClick = { onLongPressApp(app) }
+                                            )
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -838,89 +962,128 @@ fun UnifiedSearchSheet(
                         }
                     }
 
-                    // Section E: Web Search & Offline State Awareness
-                    if (settledQuery.isNotBlank()) {
-                        item(key = "section_web_header") {
+                    // Section E: Web Search & Quick Glass Browser Launch
+                    item(key = "section_web_header") {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
                             Text(
-                                text = "Web Search (${settings.defaultSearchEngine})",
+                                text = "Glass Web Browser (${settings.defaultSearchEngine})",
                                 style = MaterialTheme.typography.titleMedium,
                                 color = MaterialTheme.colorScheme.primary
                             )
-                        }
-                        if (!searchState.isOnline) {
-                            item {
-                                FrostedGlassBox(
-                                    shape = RoundedCornerShape(16.dp),
-                                    alphaOverride = 0.62f,
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Row(
-                                        modifier = Modifier.padding(14.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.CloudOff,
-                                            contentDescription = null,
-                                            tint = MaterialTheme.colorScheme.tertiary
-                                        )
-                                        Column {
-                                            Text(
-                                                text = "You are currently offline",
-                                                style = MaterialTheme.typography.bodyLarge,
-                                                fontWeight = FontWeight.SemiBold
-                                            )
-                                            Text(
-                                                text = "Web search requires internet. Local App, Folder, Contact, File search, and AI categorization remain active.",
-                                                style = MaterialTheme.typography.bodyMedium,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                        } else {
-                            items(searchState.webSuggestions, key = { it.url }) { suggestion ->
+                            if (searchState.isOnline) {
                                 FrostedGlassBox(
                                     shape = RoundedCornerShape(14.dp),
                                     alphaOverride = 0.56f,
                                     modifier = Modifier
-                                        .fillMaxWidth()
                                         .clickable {
                                             keyboardController?.hide()
-                                            onOpenWebUrl(suggestion.url)
+                                            val target = settledQuery.ifBlank { "https://www.google.com" }
+                                            if (settledQuery.isNotBlank()) {
+                                                onRecordHistory(settledQuery, "WEB")
+                                            }
+                                            onOpenWebUrl(target)
                                         }
-                                        .testTag("web_suggestion_${suggestion.query}")
+                                        .testTag("open_glass_webview_quick_button")
                                 ) {
                                     Row(
-                                        modifier = Modifier.padding(12.dp),
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
                                         verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                        horizontalArrangement = Arrangement.spacedBy(5.dp)
                                     ) {
                                         Icon(
                                             imageVector = Icons.Default.Public,
                                             contentDescription = null,
-                                            tint = MaterialTheme.colorScheme.primary
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(15.dp)
                                         )
-                                        Column(modifier = Modifier.weight(1f)) {
-                                            Text(
-                                                text = suggestion.query,
-                                                style = MaterialTheme.typography.bodyLarge,
-                                                fontWeight = FontWeight.Medium
-                                            )
-                                            Text(
-                                                text = "Search on ${suggestion.searchEngineName}",
-                                                style = MaterialTheme.typography.bodyMedium,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
-                                        }
-                                        Icon(
-                                            imageVector = Icons.Default.OpenInBrowser,
-                                            contentDescription = "Open web search",
-                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            modifier = Modifier.size(18.dp)
+                                        Text(
+                                            text = "Open Glass WebView",
+                                            style = MaterialTheme.typography.labelMedium,
+                                            color = MaterialTheme.colorScheme.onSurface
                                         )
                                     }
+                                }
+                            }
+                        }
+                    }
+                    if (!searchState.isOnline) {
+                        item {
+                            FrostedGlassBox(
+                                shape = RoundedCornerShape(16.dp),
+                                alphaOverride = 0.62f,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(14.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.CloudOff,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.tertiary
+                                    )
+                                    Column {
+                                        Text(
+                                            text = "You are currently offline",
+                                            style = MaterialTheme.typography.bodyLarge,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                        Text(
+                                            text = "Web search requires internet. Local App, Folder, Contact, File search, and AI categorization remain active.",
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    } else if (settledQuery.isNotBlank()) {
+                        items(searchState.webSuggestions, key = { it.url }) { suggestion ->
+                            FrostedGlassBox(
+                                shape = RoundedCornerShape(16.dp),
+                                alphaOverride = 0.56f,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        keyboardController?.hide()
+                                        onRecordHistory(suggestion.query, "WEB")
+                                        onOpenWebUrl(suggestion.url)
+                                    }
+                                    .testTag("web_suggestion_${suggestion.query}")
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Public,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary
+                                    )
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = suggestion.query,
+                                            style = MaterialTheme.typography.bodyLarge,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                        Text(
+                                            text = "Browse in Glass WebView • ${suggestion.searchEngineName}",
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                    Icon(
+                                        imageVector = Icons.Default.OpenInBrowser,
+                                        contentDescription = "Open web search",
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(18.dp)
+                                    )
                                 }
                             }
                         }
@@ -936,36 +1099,79 @@ fun UnifiedSearchSheet(
 private fun EmbeddedSecureSearchWebView(
     url: String,
     isOnline: Boolean,
+    onNavigateQueryOrUrl: (String) -> Unit,
     onClose: () -> Unit,
     onExitSearchCompletely: () -> Unit,
     onOpenExternal: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val tokens = LocalLauncherTokens.current
+    val keyboardController = LocalSoftwareKeyboardController.current
     var isGlassWebMode by remember { mutableStateOf(true) }
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
+    var addressBarInput by remember(url) {
+        mutableStateOf(url.removePrefix("https://").removePrefix("http://"))
+    }
+    var canGoBack by remember { mutableStateOf(false) }
+    var canGoForward by remember { mutableStateOf(false) }
 
     val applyFrostedWebCss: (WebView, Boolean) -> Unit = { view, glassEnabled ->
         val isDark = tokens.isDarkTheme
         val js = if (glassEnabled) {
-            val bgRgba = if (isDark) "rgba(15, 23, 42, 0.34)" else "rgba(248, 250, 252, 0.42)"
-            val cardRgba = if (isDark) "rgba(30, 41, 59, 0.54)" else "rgba(255, 255, 255, 0.60)"
+            val bgRgba = if (isDark) "rgba(15, 23, 42, 0.24)" else "rgba(248, 250, 252, 0.30)"
+            val cardRgba = if (isDark) "rgba(30, 41, 59, 0.50)" else "rgba(255, 255, 255, 0.56)"
+            val searchBarRgba = if (isDark) "rgba(15, 23, 42, 0.58)" else "rgba(255, 255, 255, 0.66)"
+            val borderRgba = if (isDark) "rgba(255, 255, 255, 0.24)" else "rgba(255, 255, 255, 0.62)"
             val textHex = if (isDark) "#F8FAFC" else "#0F172A"
             """
             (function() {
-                var style = document.getElementById('pixel-frosted-glass-style');
-                if (!style) {
-                    style = document.createElement('style');
-                    style.id = 'pixel-frosted-glass-style';
-                    document.head.appendChild(style);
+                var css = 'html, body, main, #main, #cnt, #rcnt, .L3eUgb, .sfbg, #appbar, #b_content, .site-content, #content, .mw-page-container { ' +
+                    'background: $bgRgba !important; background-color: $bgRgba !important; color: $textHex !important; ' +
+                '} ' +
+                'header, nav, #gb, #searchform, .b_scopebar, .zGVn2e, .RNNXgb, .SDkEP, .A8SBwf, #sb_form, .b_searchboxForm, form[role="search"], form[action*="search"], .search-container, .searchbox_searchbox__bfbmv { ' +
+                    'background: $searchBarRgba !important; background-color: $searchBarRgba !important; ' +
+                    'backdrop-filter: blur(20px) saturate(185%) !important; -webkit-backdrop-filter: blur(20px) saturate(185%) !important; ' +
+                    'border: 1px solid $borderRgba !important; border-radius: 24px !important; ' +
+                    'box-shadow: 0 8px 28px rgba(0, 0, 0, 0.20) !important; ' +
+                '} ' +
+                'input[type="search"], input[type="text"], input[name="q"], textarea[name="q"], .gLFyf, #sb_form_q, .b_searchbox, .search-input, input { ' +
+                    'background: transparent !important; background-color: transparent !important; ' +
+                    'color: $textHex !important; caret-color: #60A5FA !important; ' +
+                '} ' +
+                'div.g, .MjjYud > div, .result, .b_algo, article, section, .kp-blk, .xpd, .b_ans, .card { ' +
+                    'background: $cardRgba !important; background-color: $cardRgba !important; ' +
+                    'backdrop-filter: blur(16px) saturate(175%) !important; -webkit-backdrop-filter: blur(16px) saturate(175%) !important; ' +
+                    'border: 1px solid $borderRgba !important; border-radius: 18px !important; ' +
+                    'margin-bottom: 10px !important; padding: 10px !important; ' +
+                    'box-shadow: 0 4px 18px rgba(0, 0, 0, 0.14) !important; ' +
+                '}';
+                var applyStyle = function() {
+                    var head = document.head || document.documentElement;
+                    if (!head) return;
+                    var style = document.getElementById('pixel-frosted-glass-style');
+                    if (!style) {
+                        style = document.createElement('style');
+                        style.id = 'pixel-frosted-glass-style';
+                        head.appendChild(style);
+                    }
+                    if (style.innerHTML !== css) {
+                        style.innerHTML = css;
+                    }
+                };
+                applyStyle();
+                if (!window.__pixelGlassObserver) {
+                    window.__pixelGlassObserver = new MutationObserver(function() { applyStyle(); });
+                    window.__pixelGlassObserver.observe(document.documentElement, { childList: true, subtree: true });
                 }
-                style.innerHTML = 'html, body, #main, #cnt, #rcnt, .L3eUgb, .sfbg, #appbar { background: ' + '$bgRgba' + ' !important; background-color: ' + '$bgRgba' + ' !important; color: ' + '$textHex' + ' !important; } ' +
-                    'div.g, .MjjYud > div, .result, .b_algo, article, section { background: ' + '$cardRgba' + ' !important; border-radius: 16px !important; backdrop-filter: blur(10px) !important; margin-bottom: 8px !important; padding: 8px !important; }';
             })();
             """.trimIndent()
         } else {
             """
             (function() {
+                if (window.__pixelGlassObserver) {
+                    window.__pixelGlassObserver.disconnect();
+                    window.__pixelGlassObserver = null;
+                }
                 var style = document.getElementById('pixel-frosted-glass-style');
                 if (style) { style.remove(); }
             })();
@@ -978,111 +1184,203 @@ private fun EmbeddedSecureSearchWebView(
     }
 
     FrostedGlassBox(
-        shape = RoundedCornerShape(24.dp),
-        alphaOverride = if (isGlassWebMode) 0.38f else 0.82f,
+        shape = RoundedCornerShape(26.dp),
+        alphaOverride = if (isGlassWebMode) 0.30f else 0.80f,
         modifier = modifier
             .fillMaxSize()
             .padding(horizontal = 10.dp, vertical = 4.dp)
             .testTag("frosted_internet_browser_container")
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
-            // Frosted Glass Internet Browser Toolbar
+            // Frosted Glass Internet Browser Toolbar & Glass Address/Search Bar
             FrostedGlassBox(
-                shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp, bottomStart = 12.dp, bottomEnd = 12.dp),
-                alphaOverride = 0.62f,
+                shape = RoundedCornerShape(topStart = 26.dp, topEnd = 26.dp, bottomStart = 16.dp, bottomEnd = 16.dp),
+                alphaOverride = 0.56f,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Row(
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 6.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        modifier = Modifier.weight(1f)
+                    // Interactive Glass Web Search / URL Bar inside the Embedded WebView
+                    FrostedGlassBox(
+                        shape = RoundedCornerShape(20.dp),
+                        alphaOverride = 0.48f,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("webview_glass_search_bar_container")
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Public,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Text(
-                            text = url.removePrefix("https://").removePrefix("http://").take(34),
-                            style = MaterialTheme.typography.labelLarge,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            maxLines = 1
-                        )
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 8.dp, vertical = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Public,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            OutlinedTextField(
+                                value = addressBarInput,
+                                onValueChange = { addressBarInput = it },
+                                placeholder = {
+                                    Text(
+                                        text = "Search web or enter URL in Glass View...",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                },
+                                singleLine = true,
+                                textStyle = MaterialTheme.typography.bodySmall.copy(
+                                    color = MaterialTheme.colorScheme.onSurface
+                                ),
+                                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
+                                keyboardActions = KeyboardActions(
+                                    onGo = {
+                                        val target = addressBarInput.trim()
+                                        if (target.isNotEmpty()) {
+                                            keyboardController?.hide()
+                                            onNavigateQueryOrUrl(target)
+                                        }
+                                    }
+                                ),
+                                trailingIcon = {
+                                    if (addressBarInput.isNotEmpty()) {
+                                        IconButton(
+                                            onClick = { addressBarInput = "" },
+                                            modifier = Modifier.size(24.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Clear,
+                                                contentDescription = "Clear URL",
+                                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                modifier = Modifier.size(14.dp)
+                                            )
+                                        }
+                                    }
+                                },
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                                    unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
+                                    cursorColor = MaterialTheme.colorScheme.primary,
+                                    focusedContainerColor = Color.Transparent,
+                                    unfocusedContainerColor = Color.Transparent,
+                                    focusedBorderColor = Color.Transparent,
+                                    unfocusedBorderColor = Color.Transparent
+                                ),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag("webview_glass_address_input")
+                            )
+                        }
                     }
 
+                    // Glass Browser Navigation Controls Row
                     Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(2.dp)
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        FilterChip(
-                            selected = isGlassWebMode,
-                            onClick = {
-                                isGlassWebMode = !isGlassWebMode
-                                webViewRef?.let { applyFrostedWebCss(it, isGlassWebMode) }
-                            },
-                            label = {
-                                Text(
-                                    text = if (isGlassWebMode) "Glass UI" else "Solid UI",
-                                    style = MaterialTheme.typography.labelSmall
-                                )
-                            },
-                            leadingIcon = {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(2.dp)
+                        ) {
+                            IconButton(
+                                onClick = { webViewRef?.goBack() },
+                                enabled = canGoBack,
+                                modifier = Modifier.size(32.dp)
+                            ) {
                                 Icon(
-                                    imageVector = Icons.Default.AutoAwesome,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(14.dp)
+                                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                    contentDescription = "Web Back",
+                                    tint = if (canGoBack) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f),
+                                    modifier = Modifier.size(17.dp)
                                 )
-                            },
-                            modifier = Modifier.testTag("toggle_glass_web_mode_chip")
-                        )
-
-                        IconButton(
-                            onClick = { webViewRef?.reload() },
-                            modifier = Modifier.size(34.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Refresh,
-                                contentDescription = "Reload Page",
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(18.dp)
-                            )
+                            }
+                            IconButton(
+                                onClick = { webViewRef?.goForward() },
+                                enabled = canGoForward,
+                                modifier = Modifier.size(32.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                                    contentDescription = "Web Forward",
+                                    tint = if (canGoForward) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f),
+                                    modifier = Modifier.size(17.dp)
+                                )
+                            }
+                            IconButton(
+                                onClick = { webViewRef?.reload() },
+                                modifier = Modifier.size(32.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Refresh,
+                                    contentDescription = "Reload Page",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(17.dp)
+                                )
+                            }
                         }
 
-                        IconButton(
-                            onClick = onOpenExternal,
-                            modifier = Modifier.size(34.dp)
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.OpenInBrowser,
-                                contentDescription = "Open in External Browser",
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(18.dp)
+                            FilterChip(
+                                selected = isGlassWebMode,
+                                onClick = {
+                                    isGlassWebMode = !isGlassWebMode
+                                    webViewRef?.let { applyFrostedWebCss(it, isGlassWebMode) }
+                                },
+                                label = {
+                                    Text(
+                                        text = if (isGlassWebMode) "Glass Web ON" else "Solid Web",
+                                        style = MaterialTheme.typography.labelSmall
+                                    )
+                                },
+                                leadingIcon = {
+                                    Icon(
+                                        imageVector = Icons.Default.AutoAwesome,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                },
+                                modifier = Modifier.testTag("toggle_glass_web_mode_chip")
                             )
-                        }
 
-                        IconButton(
-                            onClick = {
-                                onClose()
-                                onExitSearchCompletely()
-                            },
-                            modifier = Modifier
-                                .size(34.dp)
-                                .testTag("close_web_browser_button")
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Close,
-                                contentDescription = "Close Internet View",
-                                tint = MaterialTheme.colorScheme.onSurface,
-                                modifier = Modifier.size(18.dp)
-                            )
+                            IconButton(
+                                onClick = onOpenExternal,
+                                modifier = Modifier.size(32.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.OpenInBrowser,
+                                    contentDescription = "Open in External Browser",
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+
+                            IconButton(
+                                onClick = {
+                                    onClose()
+                                    onExitSearchCompletely()
+                                },
+                                modifier = Modifier
+                                    .size(32.dp)
+                                    .testTag("close_web_browser_button")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = "Close Internet View",
+                                    tint = MaterialTheme.colorScheme.onSurface,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
                         }
                     }
                 }
@@ -1141,9 +1439,37 @@ private fun EmbeddedSecureSearchWebView(
                                     return scheme != "https" && scheme != "http"
                                 }
 
+                                override fun onPageStarted(
+                                    view: WebView?,
+                                    startedUrl: String?,
+                                    favicon: android.graphics.Bitmap?
+                                ) {
+                                    super.onPageStarted(view, startedUrl, favicon)
+                                    if (startedUrl != null) {
+                                        addressBarInput = startedUrl.removePrefix("https://").removePrefix("http://")
+                                    }
+                                    if (view != null) {
+                                        view.setBackgroundColor(android.graphics.Color.TRANSPARENT)
+                                        applyFrostedWebCss(view, isGlassWebMode)
+                                    }
+                                }
+
+                                override fun onPageCommitVisible(view: WebView?, visibleUrl: String?) {
+                                    super.onPageCommitVisible(view, visibleUrl)
+                                    if (view != null) {
+                                        view.setBackgroundColor(android.graphics.Color.TRANSPARENT)
+                                        applyFrostedWebCss(view, isGlassWebMode)
+                                    }
+                                }
+
                                 override fun onPageFinished(view: WebView?, loadedUrl: String?) {
                                     super.onPageFinished(view, loadedUrl)
+                                    if (loadedUrl != null) {
+                                        addressBarInput = loadedUrl.removePrefix("https://").removePrefix("http://")
+                                    }
                                     if (view != null) {
+                                        canGoBack = view.canGoBack()
+                                        canGoForward = view.canGoForward()
                                         view.setBackgroundColor(android.graphics.Color.TRANSPARENT)
                                         applyFrostedWebCss(view, isGlassWebMode)
                                     }
@@ -1156,6 +1482,8 @@ private fun EmbeddedSecureSearchWebView(
                     update = { webView ->
                         webViewRef = webView
                         webView.setBackgroundColor(android.graphics.Color.TRANSPARENT)
+                        canGoBack = webView.canGoBack()
+                        canGoForward = webView.canGoForward()
                         if (webView.url != url) {
                             webView.loadUrl(url)
                         } else {
@@ -1164,7 +1492,7 @@ private fun EmbeddedSecureSearchWebView(
                     },
                     modifier = Modifier
                         .fillMaxSize()
-                        .clip(RoundedCornerShape(bottomStart = 24.dp, bottomEnd = 24.dp))
+                        .clip(RoundedCornerShape(bottomStart = 26.dp, bottomEnd = 26.dp))
                 )
             }
         }

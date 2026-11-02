@@ -892,9 +892,14 @@ class LauncherRepository(
 
     suspend fun recordSearchQuery(query: String, type: String = "UNIFIED") = withContext(Dispatchers.IO) {
         val clean = query.trim()
-        if (clean.length < 2) return@withContext
+        if (clean.isEmpty()) return@withContext
         dao.deleteSearchHistoryByQuery(clean)
         dao.insertSearchHistory(SearchHistoryEntity(query = clean, searchType = type))
+        dao.trimSearchHistoryToMax50()
+    }
+
+    suspend fun deleteSearchHistoryEntry(query: String) = withContext(Dispatchers.IO) {
+        dao.deleteSearchHistoryByQuery(query)
     }
 
     suspend fun clearSearchHistory() = withContext(Dispatchers.IO) {

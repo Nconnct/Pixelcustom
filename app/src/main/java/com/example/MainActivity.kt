@@ -275,6 +275,7 @@ fun PixelCategoryLauncherRoot(
                 onOpenWebUrl = viewModel::openEmbeddedWebSearch,
                 onCloseWebView = viewModel::closeEmbeddedWebView,
                 onClearHistory = viewModel::clearSearchHistory,
+                onDeleteHistoryEntry = viewModel::deleteSearchHistoryEntry,
                 onRecordHistory = viewModel::recordSearchHistory
             )
         }
