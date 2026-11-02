@@ -26,6 +26,7 @@ import com.example.domain.model.ProposedLayoutPreview
 import com.example.domain.model.WebSearchSuggestion
 import com.example.engine.AppDiscoveryEngine
 import com.example.engine.IconPackManager
+import com.example.engine.LauncherNotificationListenerService
 import com.example.engine.LocalBackupManager
 import com.example.engine.SystemWidgetProviderItem
 import com.example.engine.UnifiedSearchEngine
@@ -90,7 +91,8 @@ data class LauncherUiState(
     val availableWidgets: List<SystemWidgetProviderItem> = emptyList(),
     val isDefaultHomeLauncher: Boolean = false,
     val statusBannerMessage: String? = null,
-    val backupJsonExportText: String = ""
+    val backupJsonExportText: String = "",
+    val notificationCounts: Map<String, Int> = emptyMap()
 )
 
 @OptIn(FlowPreview::class)
@@ -187,9 +189,12 @@ class LauncherViewModel(
             _iconPacks,
             _availableWidgets,
             _isDefaultHome,
-            _backupJsonExportText
+            _backupJsonExportText,
+            LauncherNotificationListenerService.packageNotificationCounts
         ) { arr -> arr }
-    ) { base, _ ->
+    ) { base, extras ->
+        @Suppress("UNCHECKED_CAST")
+        val notifCounts = (extras.getOrNull(9) as? Map<String, Int>) ?: emptyMap()
         base.copy(
             openedFolder = base.folders.firstOrNull { it.id == _openedFolderId.value },
             contextMenuApp = base.installedApps.firstOrNull { it.packageName == _contextMenuAppPkg.value },
@@ -199,7 +204,8 @@ class LauncherViewModel(
             availableWidgets = _availableWidgets.value,
             isDefaultHomeLauncher = _isDefaultHome.value,
             statusBannerMessage = _statusBannerMessage.value,
-            backupJsonExportText = _backupJsonExportText.value
+            backupJsonExportText = _backupJsonExportText.value,
+            notificationCounts = notifCounts
         )
     }.stateIn(
         scope = viewModelScope,
@@ -220,9 +226,12 @@ class LauncherViewModel(
                 }
         }
 
-        // Keep initial default suggestions synced when installedApps finishes loading
+        // Keep initial default suggestions and dynamic folder notification badges synced when installedApps finishes loading
         viewModelScope.launch {
             repository.installedAppsFlow.collectLatest { apps ->
+                if (apps.isNotEmpty()) {
+                    LauncherNotificationListenerService.syncDynamicBadgesWithInstalledApps(apps)
+                }
                 if (_searchState.value.debouncedQuery.isBlank() && _searchState.value.appResults.isEmpty() && apps.isNotEmpty()) {
                     executeUnifiedSearchFilter("")
                 }
@@ -367,6 +376,7 @@ class LauncherViewModel(
 
     fun launchApp(app: AppInfo) {
         clearAllSearchQueries()
+        LauncherNotificationListenerService.clearPackageNotificationsOnLaunch(app.packageName)
         viewModelScope.launch {
             val ok = repository.launchAppAndRecordUsage(app.packageName, app.activityName)
             if (!ok) {

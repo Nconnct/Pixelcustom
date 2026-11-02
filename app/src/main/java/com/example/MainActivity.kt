@@ -1,7 +1,10 @@
 package com.example
 
 import android.content.Intent
+import android.graphics.drawable.ColorDrawable
+import android.os.Build
 import android.os.Bundle
+import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -67,12 +70,40 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Ensure the user's real Android system wallpaper shows through behind the launcher
+        window.addFlags(WindowManager.LayoutParams.FLAG_SHOW_WALLPAPER)
+        window.setBackgroundDrawable(ColorDrawable(android.graphics.Color.TRANSPARENT))
         enableEdgeToEdge()
 
         setContent {
             val uiState by viewModel.uiState.collectAsStateWithLifecycle()
             val searchState by viewModel.searchState.collectAsStateWithLifecycle()
             val settings = uiState.settings
+
+            // Dynamically blur the live Android system wallpaper behind frosted glass overlays on Android 12+
+            val shouldBlurWallpaper = uiState.activeOverlay != ActiveOverlaySheet.NONE || uiState.openedFolder != null
+            LaunchedEffect(shouldBlurWallpaper, settings.blurStrengthDp) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    try {
+                        val radiusPx = if (shouldBlurWallpaper) {
+                            (settings.blurStrengthDp * resources.displayMetrics.density).toInt().coerceIn(20, 90)
+                        } else {
+                            0
+                        }
+                        window.setBackgroundBlurRadius(radiusPx)
+                        val params = window.attributes
+                        if (radiusPx > 0) {
+                            window.addFlags(WindowManager.LayoutParams.FLAG_BLUR_BEHIND)
+                            params.blurBehindRadius = radiusPx
+                        } else {
+                            window.clearFlags(WindowManager.LayoutParams.FLAG_BLUR_BEHIND)
+                            params.blurBehindRadius = 0
+                        }
+                        window.attributes = params
+                    } catch (_: Exception) {
+                    }
+                }
+            }
 
             PixelCategoryLauncherTheme(
                 themeMode = settings.themeMode,
@@ -160,8 +191,9 @@ fun PixelCategoryLauncherRoot(
             .fillMaxSize()
             .testTag("launcher_root_container")
     ) {
-        // 1. Dynamic Pixel Material You Wallpaper Background (blurs smoothly behind Frosted Glass overlay pages)
-        val wallpaperBlur = if (uiState.activeOverlay != ActiveOverlaySheet.NONE) {
+        // 1. System Wallpaper & Frosted Glass Scrim (Transparent over the user's real Android wallpaper when presetId == 0)
+        val isOverlayOpen = uiState.activeOverlay != ActiveOverlaySheet.NONE || uiState.openedFolder != null
+        val wallpaperBlur = if (isOverlayOpen) {
             tokens.blurRadiusDp
         } else {
             0.dp
@@ -169,6 +201,7 @@ fun PixelCategoryLauncherRoot(
         PixelWallpaperBackground(
             presetId = uiState.settings.wallpaperPresetId,
             isDark = tokens.isDarkTheme,
+            isOverlayOpen = isOverlayOpen,
             modifier = Modifier.blur(wallpaperBlur)
         )
 

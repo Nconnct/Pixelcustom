@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
@@ -85,6 +86,7 @@ import com.example.domain.model.FolderModel
 import com.example.domain.model.HomeItemType
 import com.example.domain.model.HomeScreenItemModel
 import com.example.domain.model.IconShapeOption
+import com.example.engine.LauncherNotificationListenerService
 import com.example.engine.WidgetHostController
 import com.example.ui.components.FrostedGlassBox
 import com.example.ui.components.LauncherAppTile
@@ -392,12 +394,14 @@ fun HomeScreenContent(
                                         HomeItemType.APP_SHORTCUT -> {
                                             val app = cellItem.packageName?.let { appsByPkg[it] }
                                             if (app != null) {
+                                                val appUnread = state.notificationCounts[app.packageName] ?: 0
                                                 LauncherAppTile(
                                                     app = app,
                                                     iconSizeDp = settings.homeIconSizeDp.dp,
                                                     iconScale = settings.iconScale,
                                                     iconShape = iconShape,
                                                     showLabel = settings.showHomeIconLabels,
+                                                    notificationCount = appUnread,
                                                     labelColor = Color.White,
                                                     onClick = {
                                                         if (movingHomeItem != null) {
@@ -418,11 +422,16 @@ fun HomeScreenContent(
                                             val folder = cellItem.folderId?.let { foldersById[it] }
                                             if (folder != null) {
                                                 val memberApps = folder.memberPackages.mapNotNull { appsByPkg[it] }
+                                                val folderUnreadCount = LauncherNotificationListenerService.computeFolderUnreadCount(
+                                                    memberPackages = folder.memberPackages,
+                                                    countsByPackage = state.notificationCounts
+                                                )
                                                 LauncherFolderTile(
                                                     folder = folder,
                                                     memberApps = memberApps,
                                                     iconSizeDp = settings.homeIconSizeDp.dp,
                                                     showLabel = settings.showHomeIconLabels,
+                                                    unreadNotificationCount = folderUnreadCount,
                                                     onClick = {
                                                         if (movingHomeItem != null) {
                                                             onMoveHomeItem(movingHomeItem.id, pageIndex, r, c, false)
@@ -476,24 +485,30 @@ fun HomeScreenContent(
                 }
             }
 
-            // 4. Pinned Frosted Glass Dock
+            // 4. Pinned Borderless Frosted Glass Dock (seamless soft glass surface above the bottom search bar)
             if (settings.showDock) {
                 val dockItems = remember(state.homeItems) {
                     state.homeItems.filter { it.isDockItem }.sortedBy { it.dockIndex }
                 }
+                val fallbackDockApps = remember(state.installedApps, dockItems) {
+                    if (dockItems.isEmpty()) state.installedApps.take(settings.dockIconCount) else emptyList()
+                }
 
                 FrostedGlassBox(
-                    shape = RoundedCornerShape(26.dp),
-                    alphaOverride = settings.dockTransparency,
+                    shape = RoundedCornerShape(28.dp),
+                    alphaOverride = (settings.dockTransparency * 0.58f).coerceIn(0.22f, 0.48f),
+                    showBorder = false,
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 16.dp, vertical = 4.dp)
+                        .heightIn(min = 74.dp)
                         .testTag("home_frosted_dock")
                 ) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 10.dp, vertical = 6.dp),
+                            .heightIn(min = 74.dp)
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
                         horizontalArrangement = Arrangement.SpaceEvenly,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
@@ -501,6 +516,7 @@ fun HomeScreenContent(
                             val dockItem = dockItems.firstOrNull { it.dockIndex == dockSlot }
                                 ?: dockItems.getOrNull(dockSlot)
                             val dockApp = dockItem?.packageName?.let { appsByPkg[it] }
+                                ?: fallbackDockApps.getOrNull(dockSlot)
 
                             Box(
                                 modifier = Modifier
@@ -530,13 +546,15 @@ fun HomeScreenContent(
                                     ),
                                 contentAlignment = Alignment.Center
                             ) {
-                                if (dockApp != null && dockItem != null) {
+                                if (dockApp != null) {
+                                    val dockUnread = state.notificationCounts[dockApp.packageName] ?: 0
                                     LauncherAppTile(
                                         app = dockApp,
                                         iconSizeDp = settings.homeIconSizeDp.dp,
                                         iconScale = settings.iconScale,
                                         iconShape = iconShape,
                                         showLabel = false,
+                                        notificationCount = dockUnread,
                                         onClick = {
                                             if (movingHomeItem != null) {
                                                 onMoveHomeItem(
@@ -590,6 +608,7 @@ fun HomeScreenContent(
             FolderDetailModal(
                 folder = activeFolder,
                 allApps = state.installedApps,
+                notificationCounts = state.notificationCounts,
                 iconShape = iconShape,
                 onDismiss = onCloseFolder,
                 onLaunchApp = { app ->
@@ -704,6 +723,7 @@ fun HomeScreenContent(
 private fun FolderDetailModal(
     folder: FolderModel,
     allApps: List<AppInfo>,
+    notificationCounts: Map<String, Int>,
     iconShape: IconShapeOption,
     onDismiss: () -> Unit,
     onLaunchApp: (AppInfo) -> Unit,
@@ -724,7 +744,7 @@ private fun FolderDetailModal(
     Dialog(onDismissRequest = onDismiss) {
         FrostedGlassBox(
             shape = RoundedCornerShape(28.dp),
-            alphaOverride = 0.94f,
+            alphaOverride = 0.88f,
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(8.dp)
@@ -790,6 +810,7 @@ private fun FolderDetailModal(
                                 iconScale = 1.0f,
                                 iconShape = iconShape,
                                 showLabel = true,
+                                notificationCount = notificationCounts[app.packageName] ?: 0,
                                 labelColor = MaterialTheme.colorScheme.onSurface,
                                 onClick = { onLaunchApp(app) },
                                 onLongClick = {}

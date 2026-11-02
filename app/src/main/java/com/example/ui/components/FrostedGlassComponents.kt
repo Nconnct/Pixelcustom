@@ -16,9 +16,12 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.GenericShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -70,14 +73,42 @@ import java.util.Date
 import java.util.Locale
 
 /**
- * Renders an atmospheric Pixel-inspired multi-layered fluid wallpaper background.
+ * Renders the user's real Android system wallpaper (when presetId == 0) with a subtle
+ * frosted glass scrim when overlays are open, or optional built-in Pixel fluid presets (1..3).
  */
 @Composable
 fun PixelWallpaperBackground(
     presetId: Int,
     isDark: Boolean,
+    isOverlayOpen: Boolean = false,
     modifier: Modifier = Modifier
 ) {
+    // When presetId == 0 (default "System Live/Static Wallpaper"), let the user's real Android
+    // wallpaper shine through directly! Only apply a soft frosted glass tint when an overlay is open.
+    if (presetId == 0) {
+        val overlayScrimAlpha = if (isOverlayOpen) {
+            if (isDark) 0.36f else 0.28f
+        } else {
+            0f
+        }
+        Canvas(modifier = modifier.fillMaxSize()) {
+            val h = size.height
+            // Subtle top & bottom readability gradient so white clock/labels stay legible on any wallpaper
+            drawRect(
+                brush = Brush.verticalGradient(
+                    colors = listOf(
+                        Color.Black.copy(alpha = 0.16f + overlayScrimAlpha),
+                        Color.Black.copy(alpha = overlayScrimAlpha),
+                        Color.Black.copy(alpha = 0.18f + overlayScrimAlpha)
+                    ),
+                    startY = 0f,
+                    endY = h
+                )
+            )
+        }
+        return
+    }
+
     val palette = remember(presetId, isDark) {
         when (presetId % 4) {
             1 -> listOf(Color(0xFF06202B), Color(0xFF074173), Color(0xFF1679AB), Color(0xFF5DEBD7))
@@ -123,7 +154,7 @@ fun PixelWallpaperBackground(
 }
 
 /**
- * Reusable Frosted Glass surface with contrast-aware translucency and subtle specular border.
+ * Reusable Frosted Glass surface with contrast-aware translucency and optional specular border.
  */
 @Composable
 fun FrostedGlassBox(
@@ -131,6 +162,7 @@ fun FrostedGlassBox(
     shape: Shape = RoundedCornerShape(24.dp),
     alphaOverride: Float? = null,
     tintOverride: Color? = null,
+    showBorder: Boolean = true,
     content: @Composable () -> Unit
 ) {
     val tokens = LocalLauncherTokens.current
@@ -144,12 +176,18 @@ fun FrostedGlassBox(
             .background(
                 brush = Brush.verticalGradient(
                     colors = listOf(
-                        baseColor.copy(alpha = (surfaceAlpha + 0.05f).coerceAtMost(0.96f)),
+                        baseColor.copy(alpha = (surfaceAlpha + 0.06f).coerceAtMost(0.96f)),
                         baseColor.copy(alpha = surfaceAlpha)
                     )
                 )
             )
-            .border(width = 1.dp, color = borderColor, shape = shape)
+            .then(
+                if (showBorder) {
+                    Modifier.border(width = 1.dp, color = borderColor, shape = shape)
+                } else {
+                    Modifier
+                }
+            )
     ) {
         content()
     }
@@ -157,20 +195,20 @@ fun FrostedGlassBox(
 
 /**
  * Full-screen translucent Frosted Glass Page surface used by App Drawer, Unified Search,
- * In-Launcher Internet Browser, and Customization sheets so the blurred Pixel wallpaper
+ * In-Launcher Internet Browser, and Customization sheets so the blurred system wallpaper
  * shines through with a refined frosted glass aesthetic.
  */
 @Composable
 fun FrostedGlassPageSurface(
     modifier: Modifier = Modifier,
-    alphaMultiplier: Float = 0.72f,
+    alphaMultiplier: Float = 0.58f,
     content: @Composable () -> Unit
 ) {
     val tokens = LocalLauncherTokens.current
-    val effectiveAlpha = (tokens.frostedSurfaceAlpha * alphaMultiplier).coerceIn(0.42f, 0.78f)
+    val effectiveAlpha = (tokens.frostedSurfaceAlpha * alphaMultiplier).coerceIn(0.32f, 0.68f)
     val baseColor = tokens.surfaceColor
     val topSheen = if (tokens.isDarkTheme) {
-        Color(0xFF1E293B).copy(alpha = effectiveAlpha)
+        Color(0xFF0F172A).copy(alpha = effectiveAlpha)
     } else {
         Color(0xFFF8FAFC).copy(alpha = effectiveAlpha)
     }
@@ -184,8 +222,8 @@ fun FrostedGlassPageSurface(
                 brush = Brush.verticalGradient(
                     colors = listOf(
                         topSheen,
-                        baseColor.copy(alpha = (effectiveAlpha + 0.06f).coerceAtMost(0.82f)),
-                        baseColor.copy(alpha = (effectiveAlpha + 0.10f).coerceAtMost(0.85f))
+                        baseColor.copy(alpha = (effectiveAlpha + 0.04f).coerceAtMost(0.72f)),
+                        baseColor.copy(alpha = (effectiveAlpha + 0.08f).coerceAtMost(0.75f))
                     )
                 )
             )
@@ -388,6 +426,7 @@ fun LauncherAppTile(
     iconShape: IconShapeOption,
     showLabel: Boolean,
     showCategoryBadge: Boolean = false,
+    notificationCount: Int = 0,
     labelColor: Color = Color.White,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
@@ -448,6 +487,32 @@ fun LauncherAppTile(
                 }
             }
 
+            if (notificationCount > 0) {
+                val badgeLabel = if (notificationCount > 99) "99+" else notificationCount.toString()
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .offset(x = 4.dp, y = (-4).dp)
+                        .widthIn(min = 18.dp)
+                        .height(18.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.primary)
+                        .border(1.5.dp, Color(0xFF0F172A), CircleShape)
+                        .padding(horizontal = 4.dp)
+                        .testTag("app_badge_${app.packageName}"),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = badgeLabel,
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold
+                        ),
+                        color = MaterialTheme.colorScheme.onPrimary
+                    )
+                }
+            }
+
             if (showCategoryBadge) {
                 val confPct = (app.categoryConfidence * 100).toInt()
                 val badgeBg = if (app.isUserOverridden) {
@@ -488,7 +553,8 @@ fun LauncherAppTile(
 }
 
 /**
- * Renders a 2x2 Frosted Glass Smart Folder icon on the Home Screen.
+ * Renders a 2x2 Frosted Glass ML Smart Folder icon on the Home Screen with a dynamic
+ * unread notification count badge on the top-right corner of the folder.
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -497,6 +563,7 @@ fun LauncherFolderTile(
     memberApps: List<AppInfo>,
     iconSizeDp: Dp,
     showLabel: Boolean,
+    unreadNotificationCount: Int = 0,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
     modifier: Modifier = Modifier
@@ -521,49 +588,78 @@ fun LauncherFolderTile(
             .padding(vertical = 4.dp, horizontal = 4.dp)
             .testTag("folder_tile_${folder.id}")
     ) {
-        FrostedGlassBox(
-            shape = RoundedCornerShape(percent = 30),
-            alphaOverride = 0.72f,
-            modifier = Modifier.size(iconSizeDp)
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(6.dp),
-                verticalArrangement = Arrangement.SpaceEvenly,
-                horizontalAlignment = Alignment.CenterHorizontally
+        Box(contentAlignment = Alignment.TopEnd) {
+            FrostedGlassBox(
+                shape = RoundedCornerShape(percent = 30),
+                alphaOverride = 0.66f,
+                modifier = Modifier.size(iconSizeDp)
             ) {
-                for (r in 0..1) {
-                    Row(
-                        horizontalArrangement = Arrangement.SpaceEvenly,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        for (c in 0..1) {
-                            val idx = r * 2 + c
-                            val app = memberApps.getOrNull(idx)
-                            Box(
-                                modifier = Modifier
-                                    .size((iconSizeDp.value * 0.34f).dp)
-                                    .clip(CircleShape)
-                                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.25f)),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                if (app?.appIcon != null) {
-                                    Image(
-                                        bitmap = app.appIcon,
-                                        contentDescription = app.appName,
-                                        modifier = Modifier.fillMaxSize()
-                                    )
-                                } else if (app != null) {
-                                    Text(
-                                        text = app.appName.take(1).uppercase(),
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = Color.White
-                                    )
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(6.dp),
+                    verticalArrangement = Arrangement.SpaceEvenly,
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    for (r in 0..1) {
+                        Row(
+                            horizontalArrangement = Arrangement.SpaceEvenly,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            for (c in 0..1) {
+                                val idx = r * 2 + c
+                                val app = memberApps.getOrNull(idx)
+                                Box(
+                                    modifier = Modifier
+                                        .size((iconSizeDp.value * 0.34f).dp)
+                                        .clip(CircleShape)
+                                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.25f)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    if (app?.appIcon != null) {
+                                        Image(
+                                            bitmap = app.appIcon,
+                                            contentDescription = app.appName,
+                                            modifier = Modifier.fillMaxSize()
+                                        )
+                                    } else if (app != null) {
+                                        Text(
+                                            text = app.appName.take(1).uppercase(),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = Color.White
+                                        )
+                                    }
                                 }
                             }
                         }
                     }
+                }
+            }
+
+            // Dynamic Unread Count Number Badge on the Folder Corner (keeps user informed without opening folder)
+            if (unreadNotificationCount > 0) {
+                val badgeText = if (unreadNotificationCount > 99) "99+" else unreadNotificationCount.toString()
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .offset(x = 5.dp, y = (-5).dp)
+                        .widthIn(min = 20.dp)
+                        .height(20.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.primary)
+                        .border(1.5.dp, Color(0xFF0F172A), CircleShape)
+                        .padding(horizontal = 5.dp)
+                        .testTag("folder_badge_${folder.id}"),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = badgeText,
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold
+                        ),
+                        color = MaterialTheme.colorScheme.onPrimary
+                    )
                 }
             }
         }

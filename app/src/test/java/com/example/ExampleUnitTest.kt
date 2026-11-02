@@ -172,4 +172,30 @@ class ExampleUnitTest {
         assertEquals(1, restoredFolders.size)
         assertEquals("Finance", restoredFolders.first().folderName)
     }
+
+    @Test
+    fun `ML folder notification badges aggregate unread counts and update dynamically on app launch`() {
+        val sampleApps = listOf(
+            AppInfo("Telegram", "org.telegram.messenger", categoryId = DefaultCategory.MESSAGING.id),
+            AppInfo("Instagram", "com.instagram.android", categoryId = DefaultCategory.SOCIAL.id),
+            AppInfo("Gmail", "com.google.android.gm", categoryId = DefaultCategory.PRODUCTIVITY.id)
+        )
+        com.example.engine.LauncherNotificationListenerService.syncDynamicBadgesWithInstalledApps(sampleApps)
+        val countsBefore = com.example.engine.LauncherNotificationListenerService.packageNotificationCounts.value
+
+        val socialFolderUnread = com.example.engine.LauncherNotificationListenerService.computeFolderUnreadCount(
+            memberPackages = listOf("org.telegram.messenger", "com.instagram.android"),
+            countsByPackage = countsBefore
+        )
+        assertTrue(socialFolderUnread > 0)
+
+        // Launching Telegram clears its unread badge and dynamically reduces the folder's unread count
+        com.example.engine.LauncherNotificationListenerService.clearPackageNotificationsOnLaunch("org.telegram.messenger")
+        val countsAfter = com.example.engine.LauncherNotificationListenerService.packageNotificationCounts.value
+        val socialFolderUnreadAfter = com.example.engine.LauncherNotificationListenerService.computeFolderUnreadCount(
+            memberPackages = listOf("org.telegram.messenger", "com.instagram.android"),
+            countsByPackage = countsAfter
+        )
+        assertTrue(socialFolderUnreadAfter < socialFolderUnread)
+    }
 }
