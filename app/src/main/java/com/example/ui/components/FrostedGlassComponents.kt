@@ -452,7 +452,7 @@ fun PixelBottomSearchBar(
             }
         }
     }
-
+}
 
 /**
  * Returns the Shape corresponding to the user's selected IconShapeOption.
