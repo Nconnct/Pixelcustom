@@ -193,6 +193,8 @@ fun HomeScreenContent(
     var lastEdgePageTurnMs by remember { mutableLongStateOf(0L) }
     // Keep the drop destination latched independently of PagerState settling timing.
     var dragDestinationPage by remember { mutableIntStateOf(0) }
+    // Serializes edge-page turns: PagerState.isScrollInProgress may update a frame after animateScrollToPage.
+    var edgePageTurnLocked by remember { mutableStateOf(false) }
 
     var folderQuickMenuTarget by remember { mutableStateOf<PlacedGridItem?>(null) }
     var folderQuickMenuBounds by remember { mutableStateOf(Rect.Zero) }
@@ -725,24 +727,33 @@ fun HomeScreenContent(
 
                                                 // Auto-scroll pager when dragging near left/right screen edges
                                                 val now = System.currentTimeMillis()
-                                                if (now - lastEdgePageTurnMs > 500L && !pagerState.isScrollInProgress && rootBoundsInRoot.width > 0f) {
-                                                    if (dragFingerInRoot.x - rootBoundsInRoot.left <= edgeScrollZonePx && pagerState.currentPage > 0) {
+                                                val pagerLeft = workspaceBoundsInRoot.left
+                                                val pagerRight = workspaceBoundsInRoot.right
+                                                if (
+                                                    now - lastEdgePageTurnMs > 650L &&
+                                                    !edgePageTurnLocked &&
+                                                    !pagerState.isScrollInProgress &&
+                                                    workspaceBoundsInRoot.width > 0f
+                                                ) {
+                                                    val nextPage = when {
+                                                        dragFingerInRoot.x - pagerLeft <= edgeScrollZonePx &&
+                                                            dragDestinationPage > 0 -> dragDestinationPage - 1
+                                                        pagerRight - dragFingerInRoot.x <= edgeScrollZonePx &&
+                                                            dragDestinationPage < pageCount - 1 -> dragDestinationPage + 1
+                                                        else -> null
+                                                    }
+                                                    if (nextPage != null) {
                                                         lastEdgePageTurnMs = now
-                                                        val nextPage = (pagerState.currentPage - 1).coerceAtLeast(0)
                                                         dragDestinationPage = nextPage
+                                                        edgePageTurnLocked = true
                                                         haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                                         view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
                                                         coroutineScope.launch {
-                                                            pagerState.animateScrollToPage(nextPage)
-                                                        }
-                                                    } else if (rootBoundsInRoot.right - dragFingerInRoot.x <= edgeScrollZonePx && pagerState.currentPage < pageCount - 1) {
-                                                        lastEdgePageTurnMs = now
-                                                        val nextPage = (pagerState.currentPage + 1).coerceAtMost(pageCount - 1)
-                                                        dragDestinationPage = nextPage
-                                                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                                        view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
-                                                        coroutineScope.launch {
-                                                            pagerState.animateScrollToPage(nextPage)
+                                                            try {
+                                                                pagerState.animateScrollToPage(nextPage)
+                                                            } finally {
+                                                                edgePageTurnLocked = false
+                                                            }
                                                         }
                                                     }
                                                 }
@@ -832,6 +843,7 @@ fun HomeScreenContent(
                                                 val targetCell = hoverGridCell
 
                                                 draggedItem = null
+                                                edgePageTurnLocked = false
                                                 dragTotalDistance = 0f
                                                 hoverGridCell = null
                                                 hoverDockSlot = null
@@ -893,6 +905,7 @@ fun HomeScreenContent(
                                             },
                                             onDragCancel = {
                                                 draggedItem = null
+                                                edgePageTurnLocked = false
                                                 dragTotalDistance = 0f
                                                 hoverGridCell = null
                                                 hoverDockSlot = null
