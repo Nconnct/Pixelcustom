@@ -410,20 +410,27 @@ fun HomeScreenContent(
                     state.homeItems.filter { !it.isDockItem && it.pageIndex == pageIndex }
                 }
 
-                // Fallback extra apps for Pages 2 and 3 if database hasn't populated them yet
+                // Pages 2/3 have a virtual app list when the database has not populated them.
+                // Keep the fallback slice stable, but omit apps that have already been pinned
+                // anywhere on the home screen. Merge real items with fallback items so a single
+                // cross-page drop does not make the rest of that page disappear.
                 val effectivePageItems = remember(rawPageItems, state.installedApps, state.homeItems, pageIndex, gridCols) {
-                    if (rawPageItems.isNotEmpty() || pageIndex == 0 || state.installedApps.isEmpty()) {
+                    if (pageIndex == 0 || state.installedApps.isEmpty()) {
                         rawPageItems
                     } else {
-                        val dockPkgs = state.homeItems.filter { it.isDockItem }.mapNotNullTo(mutableSetOf()) { it.packageName }
-                        val candidateApps = state.installedApps.filter { it.packageName !in dockPkgs }
+                        val dockPkgs = state.homeItems.filter { it.isDockItem }
+                            .mapNotNullTo(mutableSetOf()) { it.packageName }
+                        val pinnedHomePkgs = state.homeItems.filter { !it.isDockItem }
+                            .mapNotNullTo(mutableSetOf()) { it.packageName }
+                        val stableCandidates = state.installedApps.filter { it.packageName !in dockPkgs }
                         val perPage = gridCols * 2
-                        val slice = if (pageIndex == 1) {
-                            candidateApps.take(perPage)
+                        val pageSlice = if (pageIndex == 1) {
+                            stableCandidates.take(perPage)
                         } else {
-                            candidateApps.drop(perPage).take(perPage)
+                            stableCandidates.drop(perPage).take(perPage)
                         }
-                        slice.mapIndexed { idx, app ->
+                        val fallbackItems = pageSlice.mapIndexedNotNull { idx, app ->
+                            if (app.packageName in pinnedHomePkgs) return@mapIndexedNotNull null
                             HomeScreenItemModel(
                                 id = -1000L - (pageIndex * 100L + idx),
                                 pageIndex = pageIndex,
@@ -437,6 +444,7 @@ fun HomeScreenContent(
                                 customLabel = app.appName
                             )
                         }
+                        rawPageItems + fallbackItems
                     }
                 }
 
