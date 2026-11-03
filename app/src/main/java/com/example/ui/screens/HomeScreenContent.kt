@@ -67,6 +67,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -155,6 +156,7 @@ fun HomeScreenContent(
     onDeleteFolder: (Long) -> Unit,
     onUndoLayout: () -> Unit,
     onRequestDefaultHome: () -> Unit,
+    onOpenWeather: () -> Unit = { onOpenOverlay(ActiveOverlaySheet.UNIFIED_SEARCH) },
     modifier: Modifier = Modifier
 ) {
     val settings = state.settings
@@ -189,6 +191,8 @@ fun HomeScreenContent(
     var hoverDockSlot by remember { mutableStateOf<Int?>(null) }
     var mergeTargetItem by remember { mutableStateOf<HomeScreenItemModel?>(null) }
     var lastEdgePageTurnMs by remember { mutableLongStateOf(0L) }
+    // Keep the drop destination latched independently of PagerState settling timing.
+    var dragDestinationPage by remember { mutableIntStateOf(0) }
 
     var folderQuickMenuTarget by remember { mutableStateOf<PlacedGridItem?>(null) }
     var folderQuickMenuBounds by remember { mutableStateOf(Rect.Zero) }
@@ -303,7 +307,8 @@ fun HomeScreenContent(
                     isDefaultHome = state.isDefaultHomeLauncher,
                     onOpenAiOrganizer = { onOpenOverlay(ActiveOverlaySheet.AI_ORGANIZER_PREVIEW) },
                     onRequestDefaultHome = onRequestDefaultHome,
-                    onOpenSettings = { onOpenOverlay(ActiveOverlaySheet.SETTINGS_CUSTOMIZATION) }
+                    onOpenSettings = { onOpenOverlay(ActiveOverlaySheet.SETTINGS_CUSTOMIZATION) },
+                    onOpenWeather = onOpenWeather
                 )
             }
 
@@ -685,6 +690,7 @@ fun HomeScreenContent(
                                                 haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                                                 view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
                                                 draggedItem = cellItem
+                                                dragDestinationPage = pageIndex
                                                 dragTotalDistance = 0f
                                                 dragFingerInRoot = itemBoundsInRoot.topLeft + startOffset
                                                 hoverGridCell = placed.displayRow to placed.col
@@ -712,17 +718,21 @@ fun HomeScreenContent(
                                                 if (now - lastEdgePageTurnMs > 500L && !pagerState.isScrollInProgress && rootBoundsInRoot.width > 0f) {
                                                     if (dragFingerInRoot.x - rootBoundsInRoot.left <= edgeScrollZonePx && pagerState.currentPage > 0) {
                                                         lastEdgePageTurnMs = now
+                                                        val nextPage = (pagerState.currentPage - 1).coerceAtLeast(0)
+                                                        dragDestinationPage = nextPage
                                                         haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                                         view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
                                                         coroutineScope.launch {
-                                                            pagerState.animateScrollToPage(pagerState.currentPage - 1)
+                                                            pagerState.animateScrollToPage(nextPage)
                                                         }
                                                     } else if (rootBoundsInRoot.right - dragFingerInRoot.x <= edgeScrollZonePx && pagerState.currentPage < pageCount - 1) {
                                                         lastEdgePageTurnMs = now
+                                                        val nextPage = (pagerState.currentPage + 1).coerceAtMost(pageCount - 1)
+                                                        dragDestinationPage = nextPage
                                                         haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                                         view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
                                                         coroutineScope.launch {
-                                                            pagerState.animateScrollToPage(pagerState.currentPage + 1)
+                                                            pagerState.animateScrollToPage(nextPage)
                                                         }
                                                     }
                                                 }
@@ -766,11 +776,7 @@ fun HomeScreenContent(
                                                     }
                                                     // Use the destination page's row count while paging during a drag.
                                                     // Page 0 reserves a row for At-a-Glance; other pages do not.
-                                                    val targetPageForHover = if (pagerState.isScrollInProgress) {
-                                                        pagerState.targetPage
-                                                    } else {
-                                                        pagerState.currentPage
-                                                    }
+                                                    val targetPageForHover = dragDestinationPage
                                                     val targetRowsForHover = (
                                                         totalGridRows -
                                                             if (targetPageForHover == 0 && settings.showAtAGlanceWidget) 1 else 0
@@ -842,7 +848,7 @@ fun HomeScreenContent(
                                                     folderQuickMenuTarget = null
                                                     haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                                     view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
-                                                    val destPage = if (pagerState.isScrollInProgress) pagerState.targetPage else pagerState.currentPage
+                                                    val destPage = dragDestinationPage
                                                     val destStartRow = if (destPage == 0 && settings.showAtAGlanceWidget) 1 else 0
                                                     when {
                                                         targetMerge != null && targetMerge.id > 0L -> {
@@ -900,7 +906,7 @@ fun HomeScreenContent(
                                                 memberApps = memberApps,
                                                 iconSizeDp = settings.homeIconSizeDp.dp,
                                                 iconScale = settings.iconScale,
-                                                showLabel = settings.showHomeIconLabels,
+                                                showLabel = true,
                                                 isExpanded2x2 = placed.spanX >= 2 && placed.spanY >= 2,
                                                 unreadNotificationCount = folderUnreadCount,
                                                 enableInternalLongClick = false,
@@ -1116,6 +1122,7 @@ fun HomeScreenContent(
                                                 view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
                                                 folderQuickMenuTarget = null
                                                 draggedItem = effectiveDockItem
+                                                dragDestinationPage = pagerState.currentPage
                                                 dragTotalDistance = 0f
                                                 dragFingerInRoot = dockSlotBoundsInRoot.topLeft + startOffset
                                                 hoverDockSlot = dockSlot
@@ -1155,7 +1162,7 @@ fun HomeScreenContent(
                                                     hoverGridCell = null
                                                 } else {
                                                     hoverDockSlot = null
-                                                    val destPage = if (pagerState.isScrollInProgress) pagerState.targetPage else pagerState.currentPage
+                                                    val destPage = dragDestinationPage
                                                     val startRow = if (destPage == 0 && settings.showAtAGlanceWidget) 1 else 0
                                                     val displayRows = (totalGridRows - startRow).coerceAtLeast(4)
                                                     val activeWidth = if (workspaceBoundsInRoot.width > 0f) {
