@@ -29,6 +29,9 @@ import androidx.compose.foundation.shape.GenericShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.CameraAlt
+import androidx.compose.material.icons.filled.Cloud
+import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.Icon
@@ -268,6 +271,7 @@ fun PixelAtAGlanceHeader(
     onOpenAiOrganizer: () -> Unit,
     onRequestDefaultHome: () -> Unit,
     onOpenSettings: () -> Unit,
+    onOpenWeather: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val haptics = LocalHapticFeedback.current
@@ -291,79 +295,95 @@ fun PixelAtAGlanceHeader(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 20.dp, vertical = 8.dp)
+            .padding(horizontal = 16.dp, vertical = 8.dp)
             .testTag("pixel_at_a_glance_header"),
-        horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = timeText,
-                style = MaterialTheme.typography.headlineMedium,
-                color = Color.White,
-                fontWeight = FontWeight.SemiBold
-            )
-            Text(
-                text = dateText,
-                style = MaterialTheme.typography.bodyMedium,
-                color = Color.White.copy(alpha = 0.86f),
-                fontWeight = FontWeight.Medium
-            )
-        }
-
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        FrostedGlassBox(
+            shape = RoundedCornerShape(30.dp),
+            alphaOverride = 0.40f,
+            showBorder = false,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(112.dp)
         ) {
-            // Small, compact AI Arrange icon button
-            FrostedGlassBox(
-                shape = CircleShape,
-                alphaOverride = 0.56f,
+            Row(
                 modifier = Modifier
-                    .size(34.dp)
-                    .clickable {
-                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                        view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
-                        onOpenAiOrganizer()
-                    }
-                    .testTag("ai_organize_header_button")
+                    .fillMaxSize()
+                    .padding(start = 22.dp, end = 14.dp, top = 12.dp, bottom = 12.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.Center
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.AutoAwesome,
-                        contentDescription = stringResource(R.string.ai_organize_title),
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(16.dp)
+                    Text(
+                        text = timeText,
+                        style = MaterialTheme.typography.headlineLarge.copy(
+                            fontSize = 39.sp,
+                            fontWeight = FontWeight.Light
+                        ),
+                        color = Color.White,
+                        maxLines = 1
+                    )
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        text = dateText,
+                        style = MaterialTheme.typography.titleSmall,
+                        color = Color.White.copy(alpha = 0.88f),
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1
                     )
                 }
-            }
 
-            IconButton(
-                onClick = {
-                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                    view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
-                    onOpenSettings()
-                },
-                modifier = Modifier
-                    .size(34.dp)
-                    .testTag("home_settings_button")
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Tune,
-                    contentDescription = stringResource(R.string.settings_title),
-                    tint = Color.White.copy(alpha = 0.90f),
-                    modifier = Modifier.size(19.dp)
+                Box(
+                    modifier = Modifier
+                        .width(1.dp)
+                        .height(66.dp)
+                        .background(Color.White.copy(alpha = 0.20f))
                 )
+
+                Row(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(22.dp))
+                        .clickable {
+                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                            onOpenWeather()
+                        }
+                        .padding(start = 14.dp, end = 6.dp, top = 8.dp, bottom = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Cloud,
+                        contentDescription = "Weather",
+                        tint = Color.White,
+                        modifier = Modifier.size(34.dp)
+                    )
+                    Column {
+                        Text(
+                            text = "Weather",
+                            style = MaterialTheme.typography.titleSmall,
+                            color = Color.White,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Text(
+                            text = "Tap for forecast",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = Color.White.copy(alpha = 0.78f),
+                            maxLines = 1
+                        )
+                    }
+                }
+
             }
         }
     }
 }
 
 /**
- * Compact centered frosted glass Search pill above the dock matching the user's screenshot.
+ * Wide frosted-glass home search widget placed directly beneath the clock/date card.
  */
 @Composable
 fun PixelBottomSearchBar(
@@ -376,15 +396,18 @@ fun PixelBottomSearchBar(
     val view = LocalView.current
 
     Box(
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(vertical = 6.dp),
         contentAlignment = Alignment.Center
     ) {
         FrostedGlassBox(
-            shape = CircleShape,
+            shape = RoundedCornerShape(32.dp),
             alphaOverride = 0.42f,
             showBorder = false,
             modifier = Modifier
-                .height(36.dp)
+                .fillMaxWidth()
+                .height(58.dp)
                 .clickable {
                     haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                     view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
@@ -393,24 +416,38 @@ fun PixelBottomSearchBar(
                 .testTag("pixel_bottom_search_bar")
         ) {
             Row(
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 20.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                horizontalArrangement = Arrangement.spacedBy(14.dp)
             ) {
-                Icon(
-                    imageVector = Icons.Default.Search,
-                    contentDescription = "Search",
-                    tint = Color.White.copy(alpha = 0.92f),
-                    modifier = Modifier.size(16.dp)
+                Text(
+                    text = "G",
+                    style = MaterialTheme.typography.headlineSmall.copy(
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 29.sp
+                    ),
+                    color = Color.White
                 )
                 Text(
-                    text = "Search",
-                    style = MaterialTheme.typography.labelLarge.copy(
-                        fontWeight = FontWeight.Medium,
-                        fontSize = 13.sp
-                    ),
+                    text = "Search anything...",
+                    style = MaterialTheme.typography.bodyLarge,
                     color = Color.White.copy(alpha = 0.92f),
-                    maxLines = 1
+                    maxLines = 1,
+                    modifier = Modifier.weight(1f)
+                )
+                Icon(
+                    imageVector = Icons.Default.Mic,
+                    contentDescription = "Voice search",
+                    tint = Color.White.copy(alpha = 0.94f),
+                    modifier = Modifier.size(23.dp)
+                )
+                Icon(
+                    imageVector = Icons.Default.CameraAlt,
+                    contentDescription = "Visual search",
+                    tint = Color.White.copy(alpha = 0.94f),
+                    modifier = Modifier.size(23.dp)
                 )
             }
         }
@@ -681,6 +718,17 @@ fun LauncherFolderTile(
                     }
                 }
                 FolderUnreadBadge(folderId = folder.id, unreadNotificationCount = unreadNotificationCount)
+            }
+            if (showLabel) {
+                Text(
+                    text = folder.folderName,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = Color.White.copy(alpha = 0.96f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(top = 3.dp)
+                )
             }
         }
         return
