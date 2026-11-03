@@ -67,6 +67,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -305,7 +306,8 @@ fun HomeScreenContent(
                     isDefaultHome = state.isDefaultHomeLauncher,
                     onOpenAiOrganizer = { onOpenOverlay(ActiveOverlaySheet.AI_ORGANIZER_PREVIEW) },
                     onRequestDefaultHome = onRequestDefaultHome,
-                    onOpenSettings = { onOpenOverlay(ActiveOverlaySheet.SETTINGS_CUSTOMIZATION) }
+                    onOpenSettings = { onOpenOverlay(ActiveOverlaySheet.SETTINGS_CUSTOMIZATION) },
+                    onOpenWeather = { onOpenOverlay(ActiveOverlaySheet.UNIFIED_SEARCH) }
                 )
             }
 
@@ -903,7 +905,7 @@ fun HomeScreenContent(
                                                 memberApps = memberApps,
                                                 iconSizeDp = settings.homeIconSizeDp.dp,
                                                 iconScale = settings.iconScale,
-                                                showLabel = settings.showHomeIconLabels,
+                                                showLabel = true,
                                                 isExpanded2x2 = placed.spanX >= 2 && placed.spanY >= 2,
                                                 unreadNotificationCount = folderUnreadCount,
                                                 enableInternalLongClick = false,
