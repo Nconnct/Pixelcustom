@@ -1159,7 +1159,7 @@ fun HomeScreenContent(
                                                     hoverGridCell = null
                                                 } else {
                                                     hoverDockSlot = null
-                                                    val destPage = if (pagerState.isScrollInProgress) pagerState.targetPage else pagerState.currentPage
+                                                    val destPage = dragDestinationPage
                                                     val startRow = if (destPage == 0 && settings.showAtAGlanceWidget) 1 else 0
                                                     val displayRows = (totalGridRows - startRow).coerceAtLeast(4)
                                                     val activeWidth = if (workspaceBoundsInRoot.width > 0f) {
