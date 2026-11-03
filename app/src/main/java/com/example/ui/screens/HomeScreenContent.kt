@@ -1128,7 +1128,7 @@ fun HomeScreenContent(
                                                 dragTotalDistance += dragAmount.getDistance()
                                                 // Auto-scroll pager when dragging near left/right screen edges
                                                 val now = System.currentTimeMillis()
-                                                if (now - lastEdgePageTurnMs > 500L && rootBoundsInRoot.width > 0f) {
+                                                if (now - lastEdgePageTurnMs > 500L && !pagerState.isScrollInProgress && rootBoundsInRoot.width > 0f) {
                                                     if (dragFingerInRoot.x - rootBoundsInRoot.left <= edgeScrollZonePx && pagerState.currentPage > 0) {
                                                         lastEdgePageTurnMs = now
                                                         haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
