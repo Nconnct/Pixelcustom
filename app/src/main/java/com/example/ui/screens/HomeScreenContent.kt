@@ -156,6 +156,7 @@ fun HomeScreenContent(
     onDeleteFolder: (Long) -> Unit,
     onUndoLayout: () -> Unit,
     onRequestDefaultHome: () -> Unit,
+    onOpenWeather: () -> Unit = { onOpenOverlay(ActiveOverlaySheet.UNIFIED_SEARCH) },
     modifier: Modifier = Modifier
 ) {
     val settings = state.settings
@@ -307,7 +308,7 @@ fun HomeScreenContent(
                     onOpenAiOrganizer = { onOpenOverlay(ActiveOverlaySheet.AI_ORGANIZER_PREVIEW) },
                     onRequestDefaultHome = onRequestDefaultHome,
                     onOpenSettings = { onOpenOverlay(ActiveOverlaySheet.SETTINGS_CUSTOMIZATION) },
-                    onOpenWeather = { onOpenOverlay(ActiveOverlaySheet.UNIFIED_SEARCH) }
+                    onOpenWeather = onOpenWeather
                 )
             }
 
