@@ -483,6 +483,10 @@ class LauncherRepository(
         val folderRow = (rows - 2).coerceIn(startRow, rows - 1)
         val homeItems = mutableListOf<HomeScreenItemEntity>()
 
+        // This path is guarded by isFirstInstall; clear before creating the starter folders.
+        dao.clearAllHomeItems()
+        dao.clearAllFolders()
+
         starterFolders.forEachIndexed { index, (name, color, categories) ->
             val column = index % cols
             val row = (folderRow + index / cols).coerceAtMost(rows - 1)
@@ -538,8 +542,6 @@ class LauncherRepository(
             )
         }
 
-        dao.clearAllHomeItems()
-        dao.clearAllFolders()
         dao.insertHomeItems(homeItems)
         dao.upsertSettings(
             settings.copy(
