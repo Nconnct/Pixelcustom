@@ -377,21 +377,6 @@ fun PixelAtAGlanceHeader(
                     }
                 }
 
-                IconButton(
-                    onClick = {
-                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                        view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
-                        onOpenSettings()
-                    },
-                    modifier = Modifier.size(34.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Tune,
-                        contentDescription = stringResource(R.string.settings_title),
-                        tint = Color.White.copy(alpha = 0.90f),
-                        modifier = Modifier.size(19.dp)
-                    )
-                }
             }
         }
     }
@@ -413,7 +398,7 @@ fun PixelBottomSearchBar(
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 6.dp),
+            .padding(vertical = 6.dp),
         contentAlignment = Alignment.Center
     ) {
         FrostedGlassBox(
@@ -733,6 +718,17 @@ fun LauncherFolderTile(
                     }
                 }
                 FolderUnreadBadge(folderId = folder.id, unreadNotificationCount = unreadNotificationCount)
+            }
+            if (showLabel) {
+                Text(
+                    text = folder.folderName,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = Color.White.copy(alpha = 0.96f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(top = 3.dp)
+                )
             }
         }
         return
