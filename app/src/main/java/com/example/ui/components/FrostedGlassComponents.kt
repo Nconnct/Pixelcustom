@@ -383,7 +383,7 @@ fun PixelAtAGlanceHeader(
 }
 
 /**
- * Compact centered frosted glass Search pill above the dock matching the user's screenshot.
+ * Wide frosted-glass home search widget placed directly beneath the clock/date card.
  */
 @Composable
 fun PixelBottomSearchBar(
