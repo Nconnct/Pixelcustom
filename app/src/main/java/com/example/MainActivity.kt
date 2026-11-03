@@ -232,7 +232,11 @@ fun PixelCategoryLauncherRoot(
                 onUpdateFolder = viewModel::updateFolder,
                 onDeleteFolder = viewModel::deleteFolder,
                 onUndoLayout = viewModel::undoLastLayoutChange,
-                onRequestDefaultHome = requestDefaultHomeAction
+                onRequestDefaultHome = requestDefaultHomeAction,
+                onOpenWeather = {
+                    viewModel.openOverlay(ActiveOverlaySheet.UNIFIED_SEARCH)
+                    viewModel.updateUnifiedSearchQuery("weather", immediate = true)
+                }
             )
         }
 
