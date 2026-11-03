@@ -70,6 +70,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
@@ -89,6 +90,7 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -183,6 +185,8 @@ fun HomeScreenContent(
     var rootBoundsInRoot by remember { mutableStateOf(Rect.Zero) }
     var workspaceBoundsInRoot by remember { mutableStateOf(Rect.Zero) }
     var activeGridBoundsInRoot by remember { mutableStateOf(Rect.Zero) }
+    // Store live grid bounds for every pager page; source-page bounds are not valid after a page turn.
+    val pageGridBoundsInRoot = remember { mutableStateMapOf<Int, Rect>() }
     var dockBoundsInRoot by remember { mutableStateOf(Rect.Zero) }
     var draggedItem by remember { mutableStateOf<HomeScreenItemModel?>(null) }
     var dragFingerInRoot by remember { mutableStateOf(Offset.Zero) }
@@ -406,20 +410,27 @@ fun HomeScreenContent(
                     state.homeItems.filter { !it.isDockItem && it.pageIndex == pageIndex }
                 }
 
-                // Fallback extra apps for Pages 2 and 3 if database hasn't populated them yet
+                // Pages 2/3 have a virtual app list when the database has not populated them.
+                // Keep the fallback slice stable, but omit apps that have already been pinned
+                // anywhere on the home screen. Merge real items with fallback items so a single
+                // cross-page drop does not make the rest of that page disappear.
                 val effectivePageItems = remember(rawPageItems, state.installedApps, state.homeItems, pageIndex, gridCols) {
-                    if (rawPageItems.isNotEmpty() || pageIndex == 0 || state.installedApps.isEmpty()) {
+                    if (pageIndex == 0 || state.installedApps.isEmpty()) {
                         rawPageItems
                     } else {
-                        val dockPkgs = state.homeItems.filter { it.isDockItem }.mapNotNullTo(mutableSetOf()) { it.packageName }
-                        val candidateApps = state.installedApps.filter { it.packageName !in dockPkgs }
+                        val dockPkgs = state.homeItems.filter { it.isDockItem }
+                            .mapNotNullTo(mutableSetOf()) { it.packageName }
+                        val pinnedHomePkgs = state.homeItems.filter { !it.isDockItem }
+                            .mapNotNullTo(mutableSetOf()) { it.packageName }
+                        val stableCandidates = state.installedApps.filter { it.packageName !in dockPkgs }
                         val perPage = gridCols * 2
-                        val slice = if (pageIndex == 1) {
-                            candidateApps.take(perPage)
+                        val pageSlice = if (pageIndex == 1) {
+                            stableCandidates.take(perPage)
                         } else {
-                            candidateApps.drop(perPage).take(perPage)
+                            stableCandidates.drop(perPage).take(perPage)
                         }
-                        slice.mapIndexed { idx, app ->
+                        val fallbackItems = pageSlice.mapIndexedNotNull { idx, app ->
+                            if (app.packageName in pinnedHomePkgs) return@mapIndexedNotNull null
                             HomeScreenItemModel(
                                 id = -1000L - (pageIndex * 100L + idx),
                                 pageIndex = pageIndex,
@@ -433,6 +444,7 @@ fun HomeScreenContent(
                                 customLabel = app.appName
                             )
                         }
+                        rawPageItems + fallbackItems
                     }
                 }
 
@@ -596,8 +608,10 @@ fun HomeScreenContent(
                             .weight(1f)
                             .fillMaxWidth()
                             .onGloballyPositioned { coords ->
+                                val bounds = coords.boundsInRoot()
+                                pageGridBoundsInRoot[pageIndex] = bounds
                                 if (pagerState.currentPage == pageIndex) {
-                                    activeGridBoundsInRoot = coords.boundsInRoot()
+                                    activeGridBoundsInRoot = bounds
                                 }
                             }
                             .pointerInput(pageIndex) {
@@ -676,6 +690,9 @@ fun HomeScreenContent(
                             var itemBoundsInRoot by remember(cellItem.id, placed.displayRow, placed.col, placed.spanX, placed.spanY) {
                                 mutableStateOf(Rect.Zero)
                             }
+                            var itemCoordinates by remember(cellItem.id, placed.displayRow, placed.col, placed.spanX, placed.spanY) {
+                                mutableStateOf<LayoutCoordinates?>(null)
+                            }
 
                             Box(
                                 modifier = Modifier
@@ -694,6 +711,7 @@ fun HomeScreenContent(
                                         }
                                     )
                                     .onGloballyPositioned { coords ->
+                                        itemCoordinates = coords
                                         itemBoundsInRoot = coords.boundsInRoot()
                                     }
                                     .pointerInput(cellItem.id, pageIndex, displayRows, gridCols, placed.spanX, placed.spanY) {
@@ -704,7 +722,8 @@ fun HomeScreenContent(
                                                 draggedItem = cellItem
                                                 dragDestinationPage = pageIndex
                                                 dragTotalDistance = 0f
-                                                dragFingerInRoot = itemBoundsInRoot.topLeft + startOffset
+                                                dragFingerInRoot = itemCoordinates?.localToRoot(startOffset)
+                                                    ?: (itemBoundsInRoot.topLeft + startOffset)
                                                 hoverGridCell = placed.displayRow to placed.col
                                                 hoverDockSlot = null
                                                 mergeTargetItem = null
@@ -719,8 +738,17 @@ fun HomeScreenContent(
                                             },
                                             onDrag = { change, dragAmount ->
                                                 change.consume()
-                                                dragFingerInRoot += dragAmount
-                                                dragTotalDistance += dragAmount.getDistance()
+                                                // Convert the pointer position to root coordinates on every move.
+                                                // Local dragAmount is distorted as the source tile itself moves with the pager.
+                                                val pointerInRoot = itemCoordinates?.localToRoot(change.position)
+                                                val previousFingerInRoot = dragFingerInRoot
+                                                if (pointerInRoot != null) {
+                                                    dragFingerInRoot = pointerInRoot
+                                                    dragTotalDistance += (pointerInRoot - previousFingerInRoot).getDistance()
+                                                } else {
+                                                    dragFingerInRoot += dragAmount
+                                                    dragTotalDistance += dragAmount.getDistance()
+                                                }
                                                 if (dragTotalDistance > dragMoveThresholdPx && folderQuickMenuTarget != null) {
                                                     folderQuickMenuTarget = null
                                                 }
@@ -775,26 +803,14 @@ fun HomeScreenContent(
                                                     mergeTargetItem = null
                                                 } else {
                                                     hoverDockSlot = null
-                                                    val activeWidth = if (workspaceBoundsInRoot.width > 0f) {
-                                                        (workspaceBoundsInRoot.width - with(density) { 20.dp.toPx() }).coerceAtLeast(10f)
-                                                    } else {
-                                                        activeGridBoundsInRoot.width.coerceAtLeast(10f)
-                                                    }
-                                                    val activeLeft = if (workspaceBoundsInRoot.width > 0f) {
-                                                        workspaceBoundsInRoot.left + with(density) { 10.dp.toPx() }
-                                                    } else {
-                                                        activeGridBoundsInRoot.left
-                                                    }
-                                                    val activeTop = if (activeGridBoundsInRoot.height > 0f) {
-                                                        activeGridBoundsInRoot.top
-                                                    } else {
-                                                        workspaceBoundsInRoot.top
-                                                    }
-                                                    val activeHeight = if (activeGridBoundsInRoot.height > 0f) {
-                                                        activeGridBoundsInRoot.height
-                                                    } else {
-                                                        workspaceBoundsInRoot.height.coerceAtLeast(10f)
-                                                    }
+                                                    // Resolve hover geometry against the actual destination page,
+                                                    // never the source page that initiated this pointer gesture.
+                                                    val destinationGridBounds = pageGridBoundsInRoot[dragDestinationPage]
+                                                        ?: activeGridBoundsInRoot
+                                                    val activeWidth = destinationGridBounds.width.coerceAtLeast(10f)
+                                                    val activeLeft = destinationGridBounds.left
+                                                    val activeTop = destinationGridBounds.top
+                                                    val activeHeight = destinationGridBounds.height.coerceAtLeast(10f)
                                                     // Use the destination page's row count while paging during a drag.
                                                     // Page 0 reserves a row for At-a-Glance; other pages do not.
                                                     val targetPageForHover = dragDestinationPage
