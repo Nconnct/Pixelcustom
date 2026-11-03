@@ -174,32 +174,45 @@ fun FrostedGlassBox(
     val tokens = LocalLauncherTokens.current
     val surfaceAlpha = (alphaOverride ?: tokens.frostedSurfaceAlpha).coerceIn(0.14f, 0.94f)
     val baseColor = tintOverride ?: tokens.surfaceColor
-    val topSpecular = if (tokens.isDarkTheme) {
-        Color.White.copy(alpha = 0.14f)
-    } else {
-        Color.White.copy(alpha = 0.34f)
-    }
+    val isDark = tokens.isDarkTheme
+    val rimAlpha = if (isDark) 0.34f else 0.48f
+    val upperSheen = if (isDark) 0.16f else 0.32f
 
     Box(
         modifier = modifier
             .clip(shape)
+            // A transparent tinted pane lets the live wallpaper remain visible through the glass.
             .background(
                 brush = Brush.verticalGradient(
                     colors = listOf(
-                        baseColor.copy(alpha = (surfaceAlpha + 0.08f).coerceAtMost(0.95f)),
-                        baseColor.copy(alpha = surfaceAlpha),
-                        baseColor.copy(alpha = (surfaceAlpha - 0.04f).coerceAtLeast(0.12f))
+                        baseColor.copy(alpha = (surfaceAlpha * 0.72f + upperSheen * 0.24f).coerceAtMost(0.62f)),
+                        baseColor.copy(alpha = surfaceAlpha * 0.62f),
+                        baseColor.copy(alpha = (surfaceAlpha * 0.78f).coerceAtLeast(0.10f))
                     )
                 )
             )
+            // Fine specular streaks and a luminous edge mimic a real glass pane.
             .background(
                 brush = Brush.linearGradient(
                     colors = listOf(
-                        topSpecular,
-                        Color.Transparent,
-                        topSpecular.copy(alpha = 0.04f)
+                        Color.White.copy(alpha = upperSheen),
+                        Color.White.copy(alpha = 0.025f),
+                        Color.White.copy(alpha = if (isDark) 0.075f else 0.12f)
                     )
                 )
+            )
+            .then(
+                if (showBorder) Modifier.border(
+                    width = 0.8.dp,
+                    brush = Brush.verticalGradient(
+                        colors = listOf(
+                            Color.White.copy(alpha = rimAlpha),
+                            Color.White.copy(alpha = if (isDark) 0.10f else 0.20f),
+                            Color.White.copy(alpha = if (isDark) 0.22f else 0.32f)
+                        )
+                    ),
+                    shape = shape
+                ) else Modifier
             )
     ) {
         content()
@@ -674,7 +687,7 @@ fun LauncherFolderTile(
 
     if (!isExpanded2x2) {
         val scaledSize = (iconSizeDp.value * iconScale.coerceIn(0.75f, 1.25f)).dp
-        val miniIconSize = (scaledSize.value * 0.235f).dp
+        val miniIconSize = (scaledSize.value * 0.34f).dp
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,
@@ -699,14 +712,14 @@ fun LauncherFolderTile(
                         verticalArrangement = Arrangement.SpaceBetween,
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        for (r in 0..2) {
+                        for (r in 0..1) {
                             Row(
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically,
                                 modifier = Modifier.fillMaxWidth()
                             ) {
-                                for (c in 0..2) {
-                                    val idx = r * 3 + c
+                                for (c in 0..1) {
+                                    val idx = r * 2 + c
                                     IosFolderMiniIcon(
                                         app = memberApps.getOrNull(idx),
                                         size = miniIconSize,
