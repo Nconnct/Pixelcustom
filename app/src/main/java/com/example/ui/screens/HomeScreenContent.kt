@@ -709,7 +709,7 @@ fun HomeScreenContent(
 
                                                 // Auto-scroll pager when dragging near left/right screen edges
                                                 val now = System.currentTimeMillis()
-                                                if (now - lastEdgePageTurnMs > 500L && rootBoundsInRoot.width > 0f) {
+                                                if (now - lastEdgePageTurnMs > 500L && !pagerState.isScrollInProgress && rootBoundsInRoot.width > 0f) {
                                                     if (dragFingerInRoot.x - rootBoundsInRoot.left <= edgeScrollZonePx && pagerState.currentPage > 0) {
                                                         lastEdgePageTurnMs = now
                                                         haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
@@ -764,12 +764,23 @@ fun HomeScreenContent(
                                                     } else {
                                                         workspaceBoundsInRoot.height.coerceAtLeast(10f)
                                                     }
+                                                    // Use the destination page's row count while paging during a drag.
+                                                    // Page 0 reserves a row for At-a-Glance; other pages do not.
+                                                    val targetPageForHover = if (pagerState.isScrollInProgress) {
+                                                        pagerState.targetPage
+                                                    } else {
+                                                        pagerState.currentPage
+                                                    }
+                                                    val targetRowsForHover = (
+                                                        totalGridRows -
+                                                            if (targetPageForHover == 0 && settings.showAtAGlanceWidget) 1 else 0
+                                                        ).coerceAtLeast(4)
                                                     val cWidthPx = activeWidth / gridCols
-                                                    val cHeightPx = activeHeight / displayRows
+                                                    val cHeightPx = activeHeight / targetRowsForHover
                                                     val relX = (dragFingerInRoot.x - activeLeft).coerceIn(0f, activeWidth - 1f)
                                                     val relY = (dragFingerInRoot.y - activeTop).coerceIn(0f, activeHeight - 1f)
                                                     val targetC = (relX / cWidthPx).toInt().coerceIn(0, gridCols - 1)
-                                                    val targetR = (relY / cHeightPx).toInt().coerceIn(0, displayRows - 1)
+                                                    val targetR = (relY / cHeightPx).toInt().coerceIn(0, targetRowsForHover - 1)
                                                     hoverGridCell = targetR to targetC
 
                                                     // Check if hovering over another item to merge into a folder (only when on starting page)
@@ -1117,7 +1128,7 @@ fun HomeScreenContent(
                                                 dragTotalDistance += dragAmount.getDistance()
                                                 // Auto-scroll pager when dragging near left/right screen edges
                                                 val now = System.currentTimeMillis()
-                                                if (now - lastEdgePageTurnMs > 500L && rootBoundsInRoot.width > 0f) {
+                                                if (now - lastEdgePageTurnMs > 500L && !pagerState.isScrollInProgress && rootBoundsInRoot.width > 0f) {
                                                     if (dragFingerInRoot.x - rootBoundsInRoot.left <= edgeScrollZonePx && pagerState.currentPage > 0) {
                                                         lastEdgePageTurnMs = now
                                                         haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
@@ -1167,12 +1178,17 @@ fun HomeScreenContent(
                                                     } else {
                                                         workspaceBoundsInRoot.height.coerceAtLeast(10f)
                                                     }
+                                                    // Match the destination page's grid geometry during a dock-to-page drag.
+                                                    val targetRowsForHover = (
+                                                        totalGridRows -
+                                                            if (destPage == 0 && settings.showAtAGlanceWidget) 1 else 0
+                                                        ).coerceAtLeast(4)
                                                     val cWidthPx = activeWidth / gridCols
-                                                    val cHeightPx = activeHeight / displayRows
+                                                    val cHeightPx = activeHeight / targetRowsForHover
                                                     val relX = (dragFingerInRoot.x - activeLeft).coerceIn(0f, activeWidth - 1f)
                                                     val relY = (dragFingerInRoot.y - activeTop).coerceIn(0f, activeHeight - 1f)
                                                     val targetC = (relX / cWidthPx).toInt().coerceIn(0, gridCols - 1)
-                                                    val targetR = (relY / cHeightPx).toInt().coerceIn(0, displayRows - 1)
+                                                    val targetR = (relY / cHeightPx).toInt().coerceIn(0, targetRowsForHover - 1)
                                                     hoverGridCell = targetR to targetC
                                                 }
                                             },
