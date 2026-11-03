@@ -1037,7 +1037,10 @@ class LauncherRepository(
         folderName: String,
         memberPackages: List<String>,
         colorHex: String = "#4285F4",
-        pageIndex: Int = 0
+        pageIndex: Int = 0,
+        spanX: Int = 2,
+        spanY: Int = 2,
+        preferredStyle: String? = null
     ) = withContext(Dispatchers.IO) {
         val settings = dao.getSettingsSnapshot() ?: LauncherSettingsEntity()
         val cols = settings.homeGridColumns.coerceIn(3, 6)
@@ -1072,7 +1075,7 @@ class LauncherRepository(
         }
 
         val cleanColor = colorHex.substringBefore(":")
-        val styleSuffix = if (memberPackages.size >= 8) "DENSE" else "BENTO"
+        val styleSuffix = preferredStyle ?: if (memberPackages.size >= 8) "DENSE" else "BENTO"
         val folderId = dao.insertFolder(
             FolderEntity(
                 folderName = folderName.ifBlank { "Smart Folder" },
@@ -1088,8 +1091,8 @@ class LauncherRepository(
                 pageIndex = cell.first,
                 row = cell.second,
                 column = cell.third,
-                spanX = 2,
-                spanY = 2,
+                spanX = spanX.coerceIn(1, 2),
+                spanY = spanY.coerceIn(1, 2),
                 isDockItem = false,
                 itemType = HomeItemType.FOLDER.name,
                 customLabel = folderName.ifBlank { "Smart Folder" },
@@ -1102,15 +1105,28 @@ class LauncherRepository(
     suspend fun updateFolderMembers(
         folderId: Long,
         newName: String,
-        memberPackages: List<String>
+        memberPackages: List<String>,
+        newColorHex: String? = null
     ) = withContext(Dispatchers.IO) {
         val existing = dao.getFoldersSnapshot().firstOrNull { it.id == folderId } ?: return@withContext
+        val cleanColor = newColorHex?.substringBefore(":") ?: existing.toDomainModel().cleanColorHex
+        val currentSuffix = if (existing.colorHex.endsWith(":DENSE")) "DENSE" else "BENTO"
+        val resolvedColor = if (newColorHex != null && (newColorHex.endsWith(":DENSE") || newColorHex.endsWith(":BENTO"))) {
+            newColorHex
+        } else {
+            "$cleanColor:$currentSuffix"
+        }
         dao.insertFolder(
             existing.copy(
                 folderName = newName.ifBlank { existing.folderName },
+                colorHex = resolvedColor,
                 memberPackagesCsv = memberPackages.distinct().joinToString(",")
             )
         )
+    }
+
+    fun matchAppsForCustomIntent(prompt: String, installedApps: List<AppInfo>): List<AppInfo> {
+        return aiClassifier.matchAppsForCustomIntent(prompt, installedApps)
     }
 
     suspend fun removeHomeItem(itemId: Long) = withContext(Dispatchers.IO) {

@@ -505,16 +505,37 @@ class LauncherViewModel(
         }
     }
 
-    fun createSmartFolder(folderName: String, memberPackages: List<String>, colorHex: String, pageIndex: Int = 0) {
+    fun createSmartFolder(
+        folderName: String,
+        memberPackages: List<String>,
+        colorHex: String,
+        pageIndex: Int = 0,
+        spanX: Int = 2,
+        spanY: Int = 2,
+        displayStyle: com.example.domain.model.FolderDisplayStyle = com.example.domain.model.FolderDisplayStyle.BENTO_2X2
+    ) {
         viewModelScope.launch {
-            repository.createFolderOnHome(folderName, memberPackages, colorHex, pageIndex)
+            val styleSuffix = if (displayStyle == com.example.domain.model.FolderDisplayStyle.DENSE_3X3) "DENSE" else "BENTO"
+            repository.createFolderOnHome(
+                folderName = folderName,
+                memberPackages = memberPackages,
+                colorHex = colorHex,
+                pageIndex = pageIndex,
+                spanX = spanX,
+                spanY = spanY,
+                preferredStyle = styleSuffix
+            )
             showBanner("Created folder '$folderName'")
         }
     }
 
-    fun updateFolder(folderId: Long, newName: String, memberPackages: List<String>) {
+    fun matchAppsForSmartIntent(prompt: String): List<AppInfo> {
+        return repository.matchAppsForCustomIntent(prompt, uiState.value.installedApps)
+    }
+
+    fun updateFolder(folderId: Long, newName: String, memberPackages: List<String>, newColorHex: String? = null) {
         viewModelScope.launch {
-            repository.updateFolderMembers(folderId, newName, memberPackages)
+            repository.updateFolderMembers(folderId, newName, memberPackages, newColorHex)
             showBanner("Updated folder '$newName'")
         }
     }

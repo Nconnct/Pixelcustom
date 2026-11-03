@@ -247,28 +247,62 @@ class OnlineAppIntelligenceService(
     private fun inferSemanticCategoryFromRichText(text: String, isSystemApp: Boolean): String? {
         val lower = text.lowercase(Locale.US)
         return when {
-            containsAny(lower, listOf("bank", "banking", "netbanking", "credit card", "loan", "mutual fund", "stock", "trading", "hdfc", "icici", "sbi", "axis", "chase", "wells fargo", "revolut", "paypal")) ->
-                DefaultCategory.BANKING.id
-            containsAny(lower, listOf("upi", "gpay", "phonepe", "paytm", "bhim", "razorpay", "cashapp", "venmo", "send money", "qr pay")) ->
-                DefaultCategory.UPI_PAYMENTS.id
-            containsAny(lower, listOf("instagram", "facebook", "twitter", "threads", "reddit", "linkedin", "snapchat", "tiktok", "pinterest", "social network", "mastodon", "bluesky")) ->
-                DefaultCategory.SOCIAL.id
-            containsAny(lower, listOf("whatsapp", "telegram", "signal", "messenger", "messages", "sms", "chat", "discord", "slack", "dialer", "phone call", "contacts")) ->
-                DefaultCategory.MESSAGING.id
-            containsAny(lower, listOf("docs", "sheets", "slides", "notion", "evernote", "todo", "task", "calendar", "gmail", "outlook", "email", "office", "pdf", "word", "excel", "notes", "keep", "workspace", "productivity")) ->
-                DefaultCategory.PRODUCTIVITY.id
-            containsAny(lower, listOf("chrome", "firefox", "brave", "opera", "edge", "vivaldi", "duckduckgo", "web browser", "internet browser")) ->
+            // 1. Games (FPS, Shooters, Battlefield, Battle Royale, RPG, Strategy, Arcade, Action, Casual)
+            containsAny(lower, listOf(
+                "game", "games", "gaming", "battlefield", "battle royale", "shooter", "fps", "tps",
+                "pubg", "bgmi", "free fire", "call of duty", "warzone", "genshin", "honkai", "clash of clans",
+                "clash royale", "brawl stars", "minecraft", "roblox", "candy crush", "subway surfers", "asphalt",
+                "ea sports", "fifa", "arcade", "puzzle game", "racing game", "action game", "moba", "pvp", "multiplayer"
+            )) -> DefaultCategory.GAMES.id
+
+            // 2. Browsers
+            containsAny(lower, listOf("chrome", "firefox", "brave", "opera", "edge", "vivaldi", "duckduckgo", "web browser", "internet browser", "sbrowser", "kiwi browser")) ->
                 DefaultCategory.BROWSERS.id
-            containsAny(lower, listOf("youtube", "netflix", "prime video", "hotstar", "disney", "twitch", "vlc", "mx player", "plex", "streaming", "movies", "tv shows")) ->
+
+            // 3. UPI & Payments (Wallets & Instant payment apps)
+            containsAny(lower, listOf("upi", "gpay", "phonepe", "paytm", "bhim", "razorpay", "cashapp", "venmo", "cred", "slice", "send money", "qr pay", "paisa", "wallet")) ->
+                DefaultCategory.UPI_PAYMENTS.id
+
+            // 4. Banking & Investments (Only if NOT a game)
+            containsAny(lower, listOf("bank", "banking", "netbanking", "credit card", "loan", "mutual fund", "stock", "trading", "hdfc", "icici", "sbi", "axis", "kotak", "chase", "wells fargo", "revolut", "zerodha", "groww", "angel one", "upstox")) ->
+                DefaultCategory.BANKING.id
+
+            // 5. Social & Dating
+            containsAny(lower, listOf("tinder", "bumble", "hinge", "okcupid", "grindr", "badoo", "shaadi", "jeevansathi", "dating", "matrimony", "instagram", "facebook", "twitter", "threads", "reddit", "linkedin", "snapchat", "tiktok", "pinterest", "social network", "mastodon", "bluesky")) ->
+                DefaultCategory.SOCIAL.id
+
+            // 6. Messaging & Chat
+            containsAny(lower, listOf("whatsapp", "telegram", "signal", "messenger", "messages", "sms", "chat", "discord", "slack", "dialer", "phone call", "contacts", "viber", "wechat", "truecaller")) ->
+                DefaultCategory.MESSAGING.id
+
+            // 7. Video & Streaming
+            containsAny(lower, listOf("youtube", "netflix", "prime video", "hotstar", "disney", "twitch", "vlc", "mx player", "plex", "streaming", "movies", "tv shows", "sonyliv", "zee5", "jiocinema", "crunchyroll")) ->
                 DefaultCategory.VIDEO_STREAMING.id
-            containsAny(lower, listOf("spotify", "music", "podcast", "audible", "wynk", "saavn", "gaana", "apple music", "soundcloud", "equalizer", "radio")) ->
+
+            // 8. Music & Audio
+            containsAny(lower, listOf("spotify", "music", "podcast", "audible", "wynk", "saavn", "gaana", "apple music", "soundcloud", "equalizer", "radio", "shazam", "jiosaavn")) ->
                 DefaultCategory.MUSIC_AUDIO.id
+
+            // 9. Education & Books / Reading
+            containsAny(lower, listOf("kindle", "books", "wattpad", "goodreads", "webtoon", "manga", "novel", "reading", "ebook", "duolingo", "coursera", "udemy", "khan academy", "unacademy", "learn", "study")) ->
+                DefaultCategory.EDUCATION.id
+
+            // 10. Productivity & Office
+            containsAny(lower, listOf("docs", "sheets", "slides", "notion", "evernote", "todo", "task", "calendar", "gmail", "outlook", "email", "office", "pdf", "word", "excel", "notes", "keep", "workspace", "productivity", "camscanner")) ->
+                DefaultCategory.PRODUCTIVITY.id
+
+            // 11. Photography
             containsAny(lower, listOf("camera", "photos", "gallery", "lightroom", "snapseed", "vsco", "photo editor", "canva", "lens")) ->
                 DefaultCategory.PHOTOGRAPHY.id
-            containsAny(lower, listOf("amazon", "flipkart", "myntra", "meesho", "ebay", "walmart", "swiggy", "zomato", "uber", "ola", "shopping", "delivery", "store")) ->
+
+            // 12. Shopping & Food Delivery
+            containsAny(lower, listOf("amazon", "flipkart", "myntra", "meesho", "ebay", "walmart", "swiggy", "zomato", "uber", "ola", "shopping", "delivery", "store", "blinkit", "zepto")) ->
                 DefaultCategory.SHOPPING.id
-            containsAny(lower, listOf("calculator", "clock", "alarm", "files", "file manager", "weather", "flashlight", "scanner", "vpn", "authenticator", "cleaner", "compass", "recorder")) ->
+
+            // 13. Utilities
+            containsAny(lower, listOf("calculator", "clock", "alarm", "files", "file manager", "weather", "flashlight", "scanner", "vpn", "authenticator", "cleaner", "compass", "recorder", "bitwarden")) ->
                 DefaultCategory.UTILITIES.id
+
             isSystemApp && containsAny(lower, listOf("settings", "system", "setup", "package installer", "bluetooth", "sim")) ->
                 DefaultCategory.SYSTEM_APPS.id
             else -> null

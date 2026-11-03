@@ -66,13 +66,24 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.data.local.LauncherSettingsEntity
+import com.example.domain.model.AppInfo
 import com.example.domain.model.ArrangementMode
+import com.example.domain.model.FolderDisplayStyle
 import com.example.domain.model.IconShapeOption
 import com.example.engine.SystemWidgetProviderItem
 import com.example.ui.components.FrostedGlassBox
 import com.example.ui.components.FrostedGlassPageSurface
 import com.example.ui.theme.AccentColors
 import com.example.ui.viewmodel.LauncherUiState
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.border
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Category
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.GridView
+import androidx.compose.material.icons.filled.Layers
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.Checkbox
 
 /**
  * Interactive AI Home Screen Auto-Arrangement Preview & Approval Sheet.
@@ -85,14 +96,60 @@ fun AiLayoutPreviewSheet(
     onSelectMode: (ArrangementMode) -> Unit,
     onApproveLayout: () -> Unit,
     onUndoPreviousLayout: () -> Unit,
+    onMatchAppsForCustomIntent: (String) -> List<AppInfo> = { emptyList() },
+    onCreateCustomSmartFolder: (name: String, packages: List<String>, colorHex: String, spanX: Int, spanY: Int, style: FolderDisplayStyle) -> Unit = { _, _, _, _, _, _ -> },
     modifier: Modifier = Modifier
 ) {
     BackHandler(onBack = onClose)
+
+    var activeTab by remember { mutableIntStateOf(0) } // 0: Custom Smart Folder, 1: Auto-Arrange Home
+
+    // Custom Smart Folder State
+    var customFolderPrompt by remember { mutableStateOf("") }
+    var selectedColorHex by remember { mutableStateOf("#3B82F6") }
+    var selectedSize by remember { mutableIntStateOf(1) } // 0: 1x1 Regular, 1: 2x2 Bento, 2: 2x2 Dense
+    var selectedPackageSet by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var userModifiedSelection by remember { mutableStateOf(false) }
+
+    val matchedApps = remember(customFolderPrompt, state.installedApps) {
+        if (customFolderPrompt.isBlank()) emptyList()
+        else onMatchAppsForCustomIntent(customFolderPrompt)
+    }
+
+    androidx.compose.runtime.LaunchedEffect(matchedApps) {
+        if (!userModifiedSelection && matchedApps.isNotEmpty()) {
+            selectedPackageSet = matchedApps.map { it.packageName }.toSet()
+        }
+    }
 
     val preview = state.proposedLayoutPreview
     val appsMap = remember(state.installedApps) {
         state.installedApps.associateBy { it.packageName }
     }
+
+    val colorOptions = listOf(
+        "#2563EB" to "Blue",
+        "#8B5CF6" to "Purple",
+        "#EC4899" to "Pink",
+        "#10B981" to "Emerald",
+        "#F59E0B" to "Amber",
+        "#EF4444" to "Crimson",
+        "#06B6D4" to "Cyan",
+        "#475569" to "Slate"
+    )
+
+    val quickIntents = listOf(
+        "Battlefield games",
+        "Browsers",
+        "UPI apps",
+        "Reading apps",
+        "Dating apps",
+        "Banking apps",
+        "Social apps",
+        "Video streaming",
+        "Shopping apps",
+        "Productivity"
+    )
 
     FrostedGlassPageSurface(
         alphaMultiplier = 0.72f,
@@ -149,7 +206,7 @@ fun AiLayoutPreviewSheet(
                                 modifier = Modifier.size(16.dp)
                             )
                             Text(
-                                text = "Undo Layout",
+                                text = "Undo",
                                 style = MaterialTheme.typography.labelLarge,
                                 fontWeight = FontWeight.SemiBold,
                                 color = MaterialTheme.colorScheme.onSurface
@@ -159,89 +216,33 @@ fun AiLayoutPreviewSheet(
                 }
             }
 
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(10.dp))
 
-            // Dedicated Frosted Glass Undo Layout Card inside the Arrange Sheet
-            FrostedGlassBox(
-                shape = RoundedCornerShape(20.dp),
-                alphaOverride = 0.62f,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag("arrange_undo_layout_card")
+            // Tab Selector: Smart Folder Creator vs Full Auto-Arrange
+            TabRow(
+                selectedTabIndex = activeTab,
+                containerColor = Color.Transparent,
+                contentColor = MaterialTheme.colorScheme.primary,
+                divider = {}
             ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(14.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "Undo Home Screen Layout",
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                        Text(
-                            text = if (state.layoutSnapshots.isNotEmpty()) {
-                                "${state.layoutSnapshots.size} saved layout snapshot(s) ready to restore (${state.layoutSnapshots.first().snapshotName})"
-                            } else {
-                                "Apply an AI arrangement below to automatically save a restorable layout snapshot."
-                            },
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    Spacer(Modifier.width(10.dp))
-                    Button(
-                        onClick = onUndoPreviousLayout,
-                        enabled = state.layoutSnapshots.isNotEmpty(),
-                        modifier = Modifier.testTag("arrange_sheet_undo_layout_button")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Undo,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(Modifier.width(6.dp))
-                        Text("Undo Layout")
-                    }
-                }
+                Tab(
+                    selected = activeTab == 0,
+                    onClick = { activeTab = 0 },
+                    text = { Text("Smart Folder Creator", fontWeight = if (activeTab == 0) FontWeight.Bold else FontWeight.Normal) },
+                    icon = { Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(18.dp)) }
+                )
+                Tab(
+                    selected = activeTab == 1,
+                    onClick = { activeTab = 1 },
+                    text = { Text("Auto-Arrange Home", fontWeight = if (activeTab == 1) FontWeight.Bold else FontWeight.Normal) },
+                    icon = { Icon(Icons.Default.Layers, contentDescription = null, modifier = Modifier.size(18.dp)) }
+                )
             }
 
             Spacer(Modifier.height(14.dp))
 
-            // Arrangement Mode Selector
-            Text(
-                text = "Select Arrangement Mode:",
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Spacer(Modifier.height(6.dp))
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                for (mode in listOf(ArrangementMode.AI_ORGANIZED, ArrangementMode.PIXEL_DEFAULT)) {
-                    val selected = preview?.mode == mode
-                    FilterChip(
-                        selected = selected,
-                        onClick = { onSelectMode(mode) },
-                        border = null,
-                        label = { Text(mode.displayName) },
-                        leadingIcon = if (selected) {
-                            { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp)) }
-                        } else null,
-                        modifier = Modifier.testTag("mode_chip_${mode.name}")
-                    )
-                }
-            }
-
-            Spacer(Modifier.height(12.dp))
-
-            if (preview != null) {
-                // Summary Card
+            if (activeTab == 0) {
+                // TAB 0: Custom Smart Folder Creator with Offline AI Recognition
                 FrostedGlassBox(
                     shape = RoundedCornerShape(20.dp),
                     alphaOverride = 0.65f,
@@ -249,34 +250,170 @@ fun AiLayoutPreviewSheet(
                 ) {
                     Column(
                         modifier = Modifier.padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
                         Text(
-                            text = "Proposed ${preview.mode.displayName} Blueprint",
+                            text = "Create Custom Smart Folder",
                             style = MaterialTheme.typography.titleMedium,
-                            color = MaterialTheme.colorScheme.primary
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
                         )
                         Text(
-                            text = preview.mode.description,
-                            style = MaterialTheme.typography.bodyMedium,
+                            text = "Type any folder topic or intent (e.g. Battlefield games, Browsers, UPI apps, Reading, Dating, Banking). The built-in Play Store dataset instantly analyzes and selects the exact matching apps.",
+                            style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
-                        Spacer(Modifier.height(4.dp))
-                        for (bullet in preview.summaryPoints) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Check,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.secondary,
-                                    modifier = Modifier.size(16.dp)
+
+                        // Quick suggestion chips
+                        Text(
+                            text = "Quick Intent Suggestions:",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            for (intent in quickIntents) {
+                                val isSelected = customFolderPrompt.equals(intent, ignoreCase = true)
+                                FilterChip(
+                                    selected = isSelected,
+                                    onClick = {
+                                        customFolderPrompt = intent
+                                        userModifiedSelection = false
+                                        val newMatches = onMatchAppsForCustomIntent(intent)
+                                        selectedPackageSet = newMatches.map { it.packageName }.toSet()
+                                    },
+                                    border = null,
+                                    label = { Text(intent, style = MaterialTheme.typography.bodySmall) },
+                                    leadingIcon = if (isSelected) {
+                                        { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(14.dp)) }
+                                    } else null
                                 )
+                            }
+                        }
+
+                        // Search/Prompt Field
+                        OutlinedTextField(
+                            value = customFolderPrompt,
+                            onValueChange = {
+                                customFolderPrompt = it
+                                userModifiedSelection = false
+                            },
+                            placeholder = { Text("e.g. Battlefield games, Browsers, UPI apps...") },
+                            label = { Text("Folder Name / AI Intent") },
+                            singleLine = true,
+                            leadingIcon = {
+                                Icon(Icons.Default.Search, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                            },
+                            trailingIcon = if (customFolderPrompt.isNotBlank()) {
+                                {
+                                    IconButton(onClick = {
+                                        customFolderPrompt = ""
+                                        selectedPackageSet = emptySet()
+                                        userModifiedSelection = false
+                                    }) {
+                                        Icon(Icons.Default.Close, contentDescription = "Clear")
+                                    }
+                                }
+                            } else null,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("custom_folder_intent_input")
+                        )
+                    }
+                }
+
+                Spacer(Modifier.height(14.dp))
+
+                // Matched Apps Section
+                FrostedGlassBox(
+                    shape = RoundedCornerShape(20.dp),
+                    alphaOverride = 0.65f,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                text = "Apps for Folder (${selectedPackageSet.size} selected)",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold
+                            )
+                            if (matchedApps.isNotEmpty()) {
                                 Text(
-                                    text = bullet,
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurface
+                                    text = "AI matched ${matchedApps.size}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                        }
+
+                        if (customFolderPrompt.isBlank()) {
+                            Text(
+                                text = "Enter a folder name or choose a suggestion above to auto-match apps with AI.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        } else if (matchedApps.isEmpty()) {
+                            Text(
+                                text = "No apps specifically matched '$customFolderPrompt'. You can choose any installed apps below.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+
+                        val displayApps = remember(matchedApps, state.installedApps) {
+                            val matchedPks = matchedApps.map { it.packageName }.toSet()
+                            matchedApps + state.installedApps.filter { it.packageName !in matchedPks }
+                        }
+
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            for (app in displayApps.take(24)) {
+                                val isChecked = app.packageName in selectedPackageSet
+                                val isAiMatched = app in matchedApps
+                                FilterChip(
+                                    selected = isChecked,
+                                    onClick = {
+                                        userModifiedSelection = true
+                                        selectedPackageSet = if (isChecked) {
+                                            selectedPackageSet - app.packageName
+                                        } else {
+                                            selectedPackageSet + app.packageName
+                                        }
+                                    },
+                                    border = null,
+                                    leadingIcon = {
+                                        if (app.appIcon != null) {
+                                            Image(
+                                                bitmap = app.appIcon,
+                                                contentDescription = null,
+                                                modifier = Modifier
+                                                    .size(18.dp)
+                                                    .clip(CircleShape)
+                                            )
+                                        } else {
+                                            Icon(Icons.Default.Category, contentDescription = null, modifier = Modifier.size(16.dp))
+                                        }
+                                    },
+                                    label = {
+                                        Text(
+                                            text = if (isAiMatched) "${app.appName} ✨" else app.appName,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            fontWeight = if (isChecked) FontWeight.SemiBold else FontWeight.Normal
+                                        )
+                                    }
                                 )
                             }
                         }
@@ -285,90 +422,443 @@ fun AiLayoutPreviewSheet(
 
                 Spacer(Modifier.height(14.dp))
 
-                // Proposed Smart Folders Preview
-                if (preview.proposedFolders.isNotEmpty()) {
-                    Text(
-                        text = "Proposed Smart Folders (${preview.proposedFolders.size})",
-                        style = MaterialTheme.typography.titleMedium
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    for (folder in preview.proposedFolders) {
-                        FrostedGlassBox(
-                            shape = RoundedCornerShape(16.dp),
-                            alphaOverride = 0.58f,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 4.dp)
+                // Folder Size Selection (Regular 1x1, Enlarged 2x2 Bento, XXL 2x2 Dense)
+                FrostedGlassBox(
+                    shape = RoundedCornerShape(20.dp),
+                    alphaOverride = 0.65f,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Text(
+                            text = "Folder Size & Layout",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
-                            Column(modifier = Modifier.padding(12.dp)) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            // Regular (1x1)
+                            val isReg = selectedSize == 0
+                            FrostedGlassBox(
+                                shape = RoundedCornerShape(16.dp),
+                                alphaOverride = if (isReg) 0.85f else 0.45f,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(16.dp))
+                                    .then(
+                                        if (isReg) Modifier.border(2.dp, Color(0xFF3B82F6), RoundedCornerShape(16.dp))
+                                        else Modifier
+                                    )
+                                    .clickable { selectedSize = 0 }
+                                    .padding(vertical = 12.dp),
+                            ) {
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    modifier = Modifier.fillMaxWidth()
                                 ) {
                                     Icon(
-                                        imageVector = Icons.Default.Folder,
+                                        Icons.Default.Folder,
                                         contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.primary
+                                        tint = if (isReg) Color(0xFF3B82F6) else MaterialTheme.colorScheme.onSurface,
+                                        modifier = Modifier.size(28.dp)
+                                    )
+                                    Spacer(Modifier.height(4.dp))
+                                    Text(
+                                        text = "Regular",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        fontWeight = if (isReg) FontWeight.Bold else FontWeight.Normal,
+                                        color = if (isReg) Color(0xFF3B82F6) else MaterialTheme.colorScheme.onSurface
                                     )
                                     Text(
-                                        text = "${folder.folderName} (Page ${folder.pageIndex + 1}, Row ${folder.row + 1})",
-                                        style = MaterialTheme.typography.bodyLarge,
-                                        fontWeight = FontWeight.SemiBold
+                                        text = "1×1 standard",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                 }
-                                Spacer(Modifier.height(4.dp))
-                                Text(
-                                    text = folder.memberPackages.mapNotNull { appsMap[it]?.appName }.joinToString(" • "),
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
+                            }
+
+                            // Enlarged (2x2 Bento)
+                            val isBento = selectedSize == 1
+                            FrostedGlassBox(
+                                shape = RoundedCornerShape(16.dp),
+                                alphaOverride = if (isBento) 0.85f else 0.45f,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(16.dp))
+                                    .then(
+                                        if (isBento) Modifier.border(2.dp, Color(0xFF3B82F6), RoundedCornerShape(16.dp))
+                                        else Modifier
+                                    )
+                                    .clickable { selectedSize = 1 }
+                                    .padding(vertical = 12.dp)
+                            ) {
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Icon(
+                                        Icons.Default.GridView,
+                                        contentDescription = null,
+                                        tint = if (isBento) Color(0xFF3B82F6) else MaterialTheme.colorScheme.onSurface,
+                                        modifier = Modifier.size(28.dp)
+                                    )
+                                    Spacer(Modifier.height(4.dp))
+                                    Text(
+                                        text = "Enlarged",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        fontWeight = if (isBento) FontWeight.Bold else FontWeight.Normal,
+                                        color = if (isBento) Color(0xFF3B82F6) else MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Text(
+                                        text = "2×2 Bento",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+
+                            // XXL (2x2 Dense)
+                            val isXxl = selectedSize == 2
+                            FrostedGlassBox(
+                                shape = RoundedCornerShape(16.dp),
+                                alphaOverride = if (isXxl) 0.85f else 0.45f,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(16.dp))
+                                    .then(
+                                        if (isXxl) Modifier.border(2.dp, Color(0xFF3B82F6), RoundedCornerShape(16.dp))
+                                        else Modifier
+                                    )
+                                    .clickable { selectedSize = 2 }
+                                    .padding(vertical = 12.dp)
+                            ) {
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Icon(
+                                        Icons.Default.Layers,
+                                        contentDescription = null,
+                                        tint = if (isXxl) Color(0xFF3B82F6) else MaterialTheme.colorScheme.onSurface,
+                                        modifier = Modifier.size(28.dp)
+                                    )
+                                    Spacer(Modifier.height(4.dp))
+                                    Text(
+                                        text = "XXL",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        fontWeight = if (isXxl) FontWeight.Bold else FontWeight.Normal,
+                                        color = if (isXxl) Color(0xFF3B82F6) else MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Text(
+                                        text = "3×3 Dense",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
                             }
                         }
                     }
                 }
 
-                Spacer(Modifier.height(12.dp))
+                Spacer(Modifier.height(14.dp))
 
-                // Proposed Dock Preview
-                Text(
-                    text = "Proposed Dock Configuration (${preview.dockPackages.size} slots)",
-                    style = MaterialTheme.typography.titleMedium
-                )
-                Spacer(Modifier.height(6.dp))
+                // Folder Color Theme
                 FrostedGlassBox(
-                    shape = RoundedCornerShape(18.dp),
-                    alphaOverride = 0.6f,
+                    shape = RoundedCornerShape(20.dp),
+                    alphaOverride = 0.65f,
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text(
-                        text = preview.dockPackages.mapNotNull { appsMap[it]?.appName }.joinToString("  |  ")
-                            .ifEmpty { "Default Essentials" },
-                        style = MaterialTheme.typography.bodyLarge,
-                        modifier = Modifier.padding(14.dp)
-                    )
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Text(
+                            text = "Folder Color Accent",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            for ((hex, _) in colorOptions) {
+                                val color = try {
+                                    Color(android.graphics.Color.parseColor(hex))
+                                } catch (_: Exception) {
+                                    Color(0xFF3B82F6)
+                                }
+                                val isSelected = selectedColorHex.equals(hex, ignoreCase = true)
+                                Box(
+                                    modifier = Modifier
+                                        .size(34.dp)
+                                        .clip(CircleShape)
+                                        .background(color)
+                                        .then(
+                                            if (isSelected) Modifier.border(3.dp, Color.White, CircleShape)
+                                            else Modifier
+                                        )
+                                        .clickable { selectedColorHex = hex },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    if (isSelected) {
+                                        Icon(Icons.Default.Check, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
 
                 Spacer(Modifier.height(20.dp))
 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                // Create Action Button
+                Button(
+                    onClick = {
+                        val name = customFolderPrompt.trim().ifEmpty { "Smart Folder" }
+                        val (spanX, spanY, style) = when (selectedSize) {
+                            0 -> Triple(1, 1, FolderDisplayStyle.BENTO_2X2)
+                            2 -> Triple(2, 2, FolderDisplayStyle.DENSE_3X3)
+                            else -> Triple(2, 2, FolderDisplayStyle.BENTO_2X2)
+                        }
+                        onCreateCustomSmartFolder(
+                            name,
+                            selectedPackageSet.toList(),
+                            selectedColorHex,
+                            spanX,
+                            spanY,
+                            style
+                        )
+                    },
+                    enabled = customFolderPrompt.isNotBlank() && selectedPackageSet.isNotEmpty(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(52.dp)
+                        .testTag("create_custom_ai_folder_button")
                 ) {
-                    FilledTonalButton(
-                        onClick = onClose,
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Text("Cancel")
-                    }
-                    Button(
-                        onClick = onApproveLayout,
+                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(20.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        text = "Create & Add to Home Screen (${selectedPackageSet.size} apps)",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            } else {
+                // TAB 1: Full Home Screen Auto-Arrangement Layout Blueprint
+                // Dedicated Frosted Glass Undo Layout Card inside the Arrange Sheet
+                FrostedGlassBox(
+                    shape = RoundedCornerShape(20.dp),
+                    alphaOverride = 0.62f,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("arrange_undo_layout_card")
+                ) {
+                    Row(
                         modifier = Modifier
-                            .weight(1f)
-                            .testTag("approve_ai_layout_button")
+                            .fillMaxWidth()
+                            .padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text("Approve & Apply")
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Undo Home Screen Layout",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = if (state.layoutSnapshots.isNotEmpty()) {
+                                    "${state.layoutSnapshots.size} saved layout snapshot(s) ready to restore (${state.layoutSnapshots.first().snapshotName})"
+                                } else {
+                                    "Apply an AI arrangement below to automatically save a restorable layout snapshot."
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Spacer(Modifier.width(10.dp))
+                        Button(
+                            onClick = onUndoPreviousLayout,
+                            enabled = state.layoutSnapshots.isNotEmpty(),
+                            modifier = Modifier.testTag("arrange_sheet_undo_layout_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Undo,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            Text("Undo")
+                        }
+                    }
+                }
+
+                Spacer(Modifier.height(14.dp))
+
+                // Arrangement Mode Selector
+                Text(
+                    text = "Select Auto-Arrangement Mode:",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(6.dp))
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    for (mode in listOf(ArrangementMode.AI_ORGANIZED, ArrangementMode.PIXEL_DEFAULT)) {
+                        val selected = preview?.mode == mode
+                        FilterChip(
+                            selected = selected,
+                            onClick = { onSelectMode(mode) },
+                            border = null,
+                            label = { Text(mode.displayName) },
+                            leadingIcon = if (selected) {
+                                { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp)) }
+                            } else null,
+                            modifier = Modifier.testTag("mode_chip_${mode.name}")
+                        )
+                    }
+                }
+
+                Spacer(Modifier.height(12.dp))
+
+                if (preview != null) {
+                    // Summary Card
+                    FrostedGlassBox(
+                        shape = RoundedCornerShape(20.dp),
+                        alphaOverride = 0.65f,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Text(
+                                text = "Proposed ${preview.mode.displayName} Blueprint",
+                                style = MaterialTheme.typography.titleMedium,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            Text(
+                                text = preview.mode.description,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Spacer(Modifier.height(4.dp))
+                            for (bullet in preview.summaryPoints) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Check,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.secondary,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Text(
+                                        text = bullet,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(Modifier.height(14.dp))
+
+                    // Proposed Smart Folders Preview
+                    if (preview.proposedFolders.isNotEmpty()) {
+                        Text(
+                            text = "Proposed Smart Folders (${preview.proposedFolders.size})",
+                            style = MaterialTheme.typography.titleMedium
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        for (folder in preview.proposedFolders) {
+                            FrostedGlassBox(
+                                shape = RoundedCornerShape(16.dp),
+                                alphaOverride = 0.58f,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 4.dp)
+                            ) {
+                                Column(modifier = Modifier.padding(12.dp)) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Folder,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.primary
+                                        )
+                                        Text(
+                                            text = "${folder.folderName} (Page ${folder.pageIndex + 1}, Row ${folder.row + 1})",
+                                            style = MaterialTheme.typography.bodyLarge,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                    }
+                                    Spacer(Modifier.height(4.dp))
+                                    Text(
+                                        text = folder.memberPackages.mapNotNull { appsMap[it]?.appName }.joinToString(" • "),
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(Modifier.height(12.dp))
+
+                    // Proposed Dock Preview
+                    Text(
+                        text = "Proposed Dock Configuration (${preview.dockPackages.size} slots)",
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    FrostedGlassBox(
+                        shape = RoundedCornerShape(18.dp),
+                        alphaOverride = 0.6f,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = preview.dockPackages.mapNotNull { appsMap[it]?.appName }.joinToString("  |  ")
+                                .ifEmpty { "Default Essentials" },
+                            style = MaterialTheme.typography.bodyLarge,
+                            modifier = Modifier.padding(14.dp)
+                        )
+                    }
+
+                    Spacer(Modifier.height(20.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        FilledTonalButton(
+                            onClick = onClose,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("Cancel")
+                        }
+                        Button(
+                            onClick = onApproveLayout,
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("approve_ai_layout_button")
+                        ) {
+                            Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("Approve & Apply")
+                        }
                     }
                 }
             }

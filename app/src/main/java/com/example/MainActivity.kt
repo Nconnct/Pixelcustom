@@ -295,7 +295,20 @@ fun PixelCategoryLauncherRoot(
                 onClose = viewModel::closeOverlaysAndGoHome,
                 onSelectMode = viewModel::generateLayoutPreview,
                 onApproveLayout = viewModel::approveAndApplyProposedLayout,
-                onUndoPreviousLayout = viewModel::undoLastLayoutChange
+                onUndoPreviousLayout = viewModel::undoLastLayoutChange,
+                onMatchAppsForCustomIntent = viewModel::matchAppsForSmartIntent,
+                onCreateCustomSmartFolder = { name, packages, color, spanX, spanY, style ->
+                    viewModel.createSmartFolder(
+                        folderName = name,
+                        memberPackages = packages,
+                        colorHex = color,
+                        pageIndex = 0,
+                        spanX = spanX,
+                        spanY = spanY,
+                        displayStyle = style
+                    )
+                    viewModel.closeOverlaysAndGoHome()
+                }
             )
         }
 

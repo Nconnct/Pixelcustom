@@ -183,16 +183,27 @@ class AiHomeOrganizer {
                 }
 
                 // Page 1 (pageIndex = 0): Expanded 2x2 Smart Folders (supporting both 2x2 Bento and 3x3 Dense styles)
+                // Page 1 (pageIndex = 0): Expanded 2x2 Smart Folders (supporting both 2x2 Bento and 3x3 Dense styles)
                 val folderClusters = listOf(
                     Triple(
-                        "Productivity",
-                        "#3B82F6:BENTO",
-                        setOf(DefaultCategory.PRODUCTIVITY.id, DefaultCategory.EDUCATION.id, DefaultCategory.TECH_DEV.id)
+                        "Games",
+                        "#8B5CF6:BENTO",
+                        setOf(DefaultCategory.GAMES.id)
                     ),
                     Triple(
                         "Banking",
                         "#2563EB:DENSE",
-                        setOf(DefaultCategory.BANKING.id, DefaultCategory.UPI_PAYMENTS.id)
+                        setOf(DefaultCategory.BANKING.id)
+                    ),
+                    Triple(
+                        "UPI & Payments",
+                        "#059669:DENSE",
+                        setOf(DefaultCategory.UPI_PAYMENTS.id)
+                    ),
+                    Triple(
+                        "Browsers",
+                        "#0284C7:BENTO",
+                        setOf(DefaultCategory.BROWSERS.id)
                     ),
                     Triple(
                         "Social",
@@ -205,17 +216,21 @@ class AiHomeOrganizer {
                         setOf(DefaultCategory.VIDEO_STREAMING.id, DefaultCategory.MUSIC_AUDIO.id, DefaultCategory.PHOTOGRAPHY.id)
                     ),
                     Triple(
+                        "Productivity",
+                        "#3B82F6:BENTO",
+                        setOf(DefaultCategory.PRODUCTIVITY.id, DefaultCategory.EDUCATION.id, DefaultCategory.TECH_DEV.id)
+                    ),
+                    Triple(
                         "Shopping",
                         "#F59E0B:BENTO",
-                        setOf(DefaultCategory.SHOPPING.id, DefaultCategory.GAMES.id)
+                        setOf(DefaultCategory.SHOPPING.id)
                     ),
                     Triple(
                         "Utilities",
-                        "#8B5CF6:BENTO",
+                        "#64748B:BENTO",
                         setOf(
                             DefaultCategory.UTILITIES.id,
                             DefaultCategory.SYSTEM_APPS.id,
-                            DefaultCategory.BROWSERS.id,
                             DefaultCategory.INTERNET.id,
                             DefaultCategory.UNCATEGORIZED.id
                         )

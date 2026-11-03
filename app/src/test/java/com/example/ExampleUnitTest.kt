@@ -236,4 +236,67 @@ class ExampleUnitTest {
         assertTrue(com.example.domain.model.FolderDisplayStyle.BENTO_2X2 in styles)
         assertTrue(com.example.domain.model.FolderDisplayStyle.DENSE_3X3 in styles)
     }
+
+    @Test
+    fun `games and banking apps are strictly separated with mutual exclusivity`() {
+        val classifier = OfflineAiClassifier(context = null)
+
+        val bgmi = classifier.classifyApp("com.pubg.imobile", "Battlegrounds Mobile India", isSystemApp = false)
+        assertEquals(DefaultCategory.GAMES.id, bgmi.categoryId)
+        assertFalse(DefaultCategory.BANKING.id == bgmi.suggestedCategoryId)
+        assertFalse(DefaultCategory.UPI_PAYMENTS.id == bgmi.suggestedCategoryId)
+
+        val freefire = classifier.classifyApp("com.dts.freefireth", "Free Fire MAX", isSystemApp = false)
+        assertEquals(DefaultCategory.GAMES.id, freefire.categoryId)
+        assertFalse(DefaultCategory.BANKING.id == freefire.suggestedCategoryId)
+
+        val cod = classifier.classifyApp("com.activision.callofduty.shooter", "Call of Duty Mobile", isSystemApp = false)
+        assertEquals(DefaultCategory.GAMES.id, cod.categoryId)
+
+        val yono = classifier.classifyApp("com.sbi.lotusintouch", "YONO SBI", isSystemApp = false)
+        assertEquals(DefaultCategory.BANKING.id, yono.categoryId)
+        assertFalse(DefaultCategory.GAMES.id == yono.suggestedCategoryId)
+
+        val gpay = classifier.classifyApp("com.google.android.apps.nbu.paisa.user", "Google Pay", isSystemApp = false)
+        assertEquals(DefaultCategory.UPI_PAYMENTS.id, gpay.categoryId)
+        assertFalse(DefaultCategory.GAMES.id == gpay.suggestedCategoryId)
+    }
+
+    @Test
+    fun `matchAppsForCustomIntent matches custom user folder intents accurately`() {
+        val classifier = OfflineAiClassifier(context = null)
+        val installedApps = listOf(
+            AppInfo("BGMI", "com.pubg.imobile", categoryId = DefaultCategory.GAMES.id),
+            AppInfo("Free Fire", "com.dts.freefireth", categoryId = DefaultCategory.GAMES.id),
+            AppInfo("Call of Duty", "com.activision.callofduty.shooter", categoryId = DefaultCategory.GAMES.id),
+            AppInfo("Chrome", "com.android.chrome", categoryId = DefaultCategory.BROWSERS.id),
+            AppInfo("Brave", "com.brave.browser", categoryId = DefaultCategory.BROWSERS.id),
+            AppInfo("PhonePe", "com.phonepe.app", categoryId = DefaultCategory.UPI_PAYMENTS.id),
+            AppInfo("Google Pay", "com.google.android.apps.nbu.paisa.user", categoryId = DefaultCategory.UPI_PAYMENTS.id),
+            AppInfo("YONO SBI", "com.sbi.lotusintouch", categoryId = DefaultCategory.BANKING.id),
+            AppInfo("Kindle", "com.amazon.kindle", categoryId = DefaultCategory.PRODUCTIVITY.id),
+            AppInfo("Tinder", "com.tinder", categoryId = DefaultCategory.SOCIAL.id)
+        )
+
+        val bfMatches = classifier.matchAppsForCustomIntent("Battlefield games", installedApps)
+        assertTrue(bfMatches.any { it.packageName == "com.pubg.imobile" })
+        assertFalse(bfMatches.any { it.packageName == "com.sbi.lotusintouch" })
+
+        val browserMatches = classifier.matchAppsForCustomIntent("browsers", installedApps)
+        assertTrue(browserMatches.any { it.packageName == "com.android.chrome" })
+        assertTrue(browserMatches.any { it.packageName == "com.brave.browser" })
+        assertFalse(browserMatches.any { it.packageName == "com.pubg.imobile" })
+
+        val upiMatches = classifier.matchAppsForCustomIntent("UPI apps", installedApps)
+        assertTrue(upiMatches.any { it.packageName == "com.phonepe.app" })
+        assertTrue(upiMatches.any { it.packageName == "com.google.android.apps.nbu.paisa.user" })
+        assertFalse(upiMatches.any { it.packageName == "com.pubg.imobile" })
+
+        val readingMatches = classifier.matchAppsForCustomIntent("reading apps", installedApps)
+        assertTrue(readingMatches.any { it.packageName == "com.amazon.kindle" })
+
+        val datingMatches = classifier.matchAppsForCustomIntent("dating apps", installedApps)
+        assertTrue(datingMatches.any { it.packageName == "com.tinder" })
+    }
 }
+

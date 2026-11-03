@@ -151,7 +151,7 @@ fun HomeScreenContent(
     onResizeFolder: (Long, Int, Int, FolderDisplayStyle) -> Unit = { _, _, _, _ -> },
     onExtractAppFromFolder: (Long, String, Int?) -> Unit = { _, _, _ -> },
     onCreateSmartFolder: (String, List<String>, String, Int) -> Unit,
-    onUpdateFolder: (Long, String, List<String>) -> Unit,
+    onUpdateFolder: (Long, String, List<String>, String?) -> Unit = { _, _, _, _ -> },
     onDeleteFolder: (Long) -> Unit,
     onUndoLayout: () -> Unit,
     onRequestDefaultHome: () -> Unit,
@@ -171,7 +171,7 @@ fun HomeScreenContent(
     val verticalSwipeThresholdPx = remember(density) { with(density) { 42.dp.toPx() } }
     val axisLockSlopPx = remember(density) { with(density) { 14.dp.toPx() } }
     val dragMoveThresholdPx = remember(density) { with(density) { 8.dp.toPx() } }
-    val edgeScrollZonePx = remember(density) { with(density) { 36.dp.toPx() } }
+    val edgeScrollZonePx = remember(density) { with(density) { 64.dp.toPx() } }
 
     var showHomeLongPressDialog by remember { mutableStateOf(false) }
     var showCreateFolderDialog by remember { mutableStateOf(false) }
@@ -179,6 +179,7 @@ fun HomeScreenContent(
 
     // Hold-and-Swipe Real-Time Drag State & Floating Folder Resize Pill State
     var rootBoundsInRoot by remember { mutableStateOf(Rect.Zero) }
+    var workspaceBoundsInRoot by remember { mutableStateOf(Rect.Zero) }
     var activeGridBoundsInRoot by remember { mutableStateOf(Rect.Zero) }
     var dockBoundsInRoot by remember { mutableStateOf(Rect.Zero) }
     var draggedItem by remember { mutableStateOf<HomeScreenItemModel?>(null) }
@@ -379,6 +380,9 @@ fun HomeScreenContent(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth()
+                    .onGloballyPositioned { coords ->
+                        workspaceBoundsInRoot = coords.boundsInRoot()
+                    }
                     .testTag("home_workspace_pager")
             ) { pageIndex ->
                 val rawPageItems = remember(state.homeItems, pageIndex) {
@@ -705,14 +709,18 @@ fun HomeScreenContent(
 
                                                 // Auto-scroll pager when dragging near left/right screen edges
                                                 val now = System.currentTimeMillis()
-                                                if (now - lastEdgePageTurnMs > 550L && rootBoundsInRoot.width > 0f) {
-                                                    if (dragFingerInRoot.x - rootBoundsInRoot.left < edgeScrollZonePx && pagerState.currentPage > 0) {
+                                                if (now - lastEdgePageTurnMs > 500L && rootBoundsInRoot.width > 0f) {
+                                                    if (dragFingerInRoot.x - rootBoundsInRoot.left <= edgeScrollZonePx && pagerState.currentPage > 0) {
                                                         lastEdgePageTurnMs = now
+                                                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                                        view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
                                                         coroutineScope.launch {
                                                             pagerState.animateScrollToPage(pagerState.currentPage - 1)
                                                         }
-                                                    } else if (rootBoundsInRoot.right - dragFingerInRoot.x < edgeScrollZonePx && pagerState.currentPage < pageCount - 1) {
+                                                    } else if (rootBoundsInRoot.right - dragFingerInRoot.x <= edgeScrollZonePx && pagerState.currentPage < pageCount - 1) {
                                                         lastEdgePageTurnMs = now
+                                                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                                        view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
                                                         coroutineScope.launch {
                                                             pagerState.animateScrollToPage(pagerState.currentPage + 1)
                                                         }
@@ -734,25 +742,44 @@ fun HomeScreenContent(
                                                     hoverDockSlot = slot
                                                     hoverGridCell = null
                                                     mergeTargetItem = null
-                                                } else if (activeGridBoundsInRoot.width > 0f && activeGridBoundsInRoot.height > 0f) {
+                                                } else {
                                                     hoverDockSlot = null
-                                                    val relX = (dragFingerInRoot.x - activeGridBoundsInRoot.left)
-                                                        .coerceIn(0f, activeGridBoundsInRoot.width - 1f)
-                                                    val relY = (dragFingerInRoot.y - activeGridBoundsInRoot.top)
-                                                        .coerceIn(0f, activeGridBoundsInRoot.height - 1f)
-                                                    val cWidthPx = activeGridBoundsInRoot.width / gridCols
-                                                    val cHeightPx = activeGridBoundsInRoot.height / displayRows
+                                                    val activeWidth = if (workspaceBoundsInRoot.width > 0f) {
+                                                        (workspaceBoundsInRoot.width - with(density) { 20.dp.toPx() }).coerceAtLeast(10f)
+                                                    } else {
+                                                        activeGridBoundsInRoot.width.coerceAtLeast(10f)
+                                                    }
+                                                    val activeLeft = if (workspaceBoundsInRoot.width > 0f) {
+                                                        workspaceBoundsInRoot.left + with(density) { 10.dp.toPx() }
+                                                    } else {
+                                                        activeGridBoundsInRoot.left
+                                                    }
+                                                    val activeTop = if (activeGridBoundsInRoot.height > 0f) {
+                                                        activeGridBoundsInRoot.top
+                                                    } else {
+                                                        workspaceBoundsInRoot.top
+                                                    }
+                                                    val activeHeight = if (activeGridBoundsInRoot.height > 0f) {
+                                                        activeGridBoundsInRoot.height
+                                                    } else {
+                                                        workspaceBoundsInRoot.height.coerceAtLeast(10f)
+                                                    }
+                                                    val cWidthPx = activeWidth / gridCols
+                                                    val cHeightPx = activeHeight / displayRows
+                                                    val relX = (dragFingerInRoot.x - activeLeft).coerceIn(0f, activeWidth - 1f)
+                                                    val relY = (dragFingerInRoot.y - activeTop).coerceIn(0f, activeHeight - 1f)
                                                     val targetC = (relX / cWidthPx).toInt().coerceIn(0, gridCols - 1)
                                                     val targetR = (relY / cHeightPx).toInt().coerceIn(0, displayRows - 1)
                                                     hoverGridCell = targetR to targetC
 
-                                                    // Check if hovering over another item to merge into a folder
+                                                    // Check if hovering over another item to merge into a folder (only when on starting page)
                                                     val occupant = cellToPlacedItem[targetR to targetC]
                                                     if (
                                                         cellItem.itemType == HomeItemType.APP_SHORTCUT &&
                                                         occupant != null &&
                                                         occupant.item.id != cellItem.id &&
-                                                        occupant.item.id > 0L
+                                                        occupant.item.id > 0L &&
+                                                        pagerState.currentPage == pageIndex
                                                     ) {
                                                         val occLeft = occupant.col * cWidthPx
                                                         val occTop = occupant.displayRow * cHeightPx
@@ -804,7 +831,7 @@ fun HomeScreenContent(
                                                     folderQuickMenuTarget = null
                                                     haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                                     view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
-                                                    val destPage = pagerState.currentPage
+                                                    val destPage = if (pagerState.isScrollInProgress) pagerState.targetPage else pagerState.currentPage
                                                     val destStartRow = if (destPage == 0 && settings.showAtAGlanceWidget) 1 else 0
                                                     when {
                                                         targetMerge != null && targetMerge.id > 0L -> {
@@ -1088,6 +1115,26 @@ fun HomeScreenContent(
                                                 change.consume()
                                                 dragFingerInRoot += dragAmount
                                                 dragTotalDistance += dragAmount.getDistance()
+                                                // Auto-scroll pager when dragging near left/right screen edges
+                                                val now = System.currentTimeMillis()
+                                                if (now - lastEdgePageTurnMs > 500L && rootBoundsInRoot.width > 0f) {
+                                                    if (dragFingerInRoot.x - rootBoundsInRoot.left <= edgeScrollZonePx && pagerState.currentPage > 0) {
+                                                        lastEdgePageTurnMs = now
+                                                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                                        view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                                                        coroutineScope.launch {
+                                                            pagerState.animateScrollToPage(pagerState.currentPage - 1)
+                                                        }
+                                                    } else if (rootBoundsInRoot.right - dragFingerInRoot.x <= edgeScrollZonePx && pagerState.currentPage < pageCount - 1) {
+                                                        lastEdgePageTurnMs = now
+                                                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                                        view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                                                        coroutineScope.launch {
+                                                            pagerState.animateScrollToPage(pagerState.currentPage + 1)
+                                                        }
+                                                    }
+                                                }
+
                                                 if (dockBoundsInRoot.width > 0f && dragFingerInRoot.y >= dockBoundsInRoot.top) {
                                                     val relX = (dragFingerInRoot.x - dockBoundsInRoot.left)
                                                         .coerceIn(0f, dockBoundsInRoot.width - 1f)
@@ -1095,20 +1142,37 @@ fun HomeScreenContent(
                                                         .toInt()
                                                         .coerceIn(0, settings.dockIconCount - 1)
                                                     hoverGridCell = null
-                                                } else if (activeGridBoundsInRoot.width > 0f && activeGridBoundsInRoot.height > 0f) {
+                                                } else {
                                                     hoverDockSlot = null
-                                                    val startRow = if (pagerState.currentPage == 0 && settings.showAtAGlanceWidget) 1 else 0
+                                                    val destPage = if (pagerState.isScrollInProgress) pagerState.targetPage else pagerState.currentPage
+                                                    val startRow = if (destPage == 0 && settings.showAtAGlanceWidget) 1 else 0
                                                     val displayRows = (totalGridRows - startRow).coerceAtLeast(4)
-                                                    val relX = (dragFingerInRoot.x - activeGridBoundsInRoot.left)
-                                                        .coerceIn(0f, activeGridBoundsInRoot.width - 1f)
-                                                    val relY = (dragFingerInRoot.y - activeGridBoundsInRoot.top)
-                                                        .coerceIn(0f, activeGridBoundsInRoot.height - 1f)
-                                                    val targetC = ((relX / activeGridBoundsInRoot.width) * gridCols)
-                                                        .toInt()
-                                                        .coerceIn(0, gridCols - 1)
-                                                    val targetR = ((relY / activeGridBoundsInRoot.height) * displayRows)
-                                                        .toInt()
-                                                        .coerceIn(0, displayRows - 1)
+                                                    val activeWidth = if (workspaceBoundsInRoot.width > 0f) {
+                                                        (workspaceBoundsInRoot.width - with(density) { 20.dp.toPx() }).coerceAtLeast(10f)
+                                                    } else {
+                                                        activeGridBoundsInRoot.width.coerceAtLeast(10f)
+                                                    }
+                                                    val activeLeft = if (workspaceBoundsInRoot.width > 0f) {
+                                                        workspaceBoundsInRoot.left + with(density) { 10.dp.toPx() }
+                                                    } else {
+                                                        activeGridBoundsInRoot.left
+                                                    }
+                                                    val activeTop = if (activeGridBoundsInRoot.height > 0f) {
+                                                        activeGridBoundsInRoot.top
+                                                    } else {
+                                                        workspaceBoundsInRoot.top
+                                                    }
+                                                    val activeHeight = if (activeGridBoundsInRoot.height > 0f) {
+                                                        activeGridBoundsInRoot.height
+                                                    } else {
+                                                        workspaceBoundsInRoot.height.coerceAtLeast(10f)
+                                                    }
+                                                    val cWidthPx = activeWidth / gridCols
+                                                    val cHeightPx = activeHeight / displayRows
+                                                    val relX = (dragFingerInRoot.x - activeLeft).coerceIn(0f, activeWidth - 1f)
+                                                    val relY = (dragFingerInRoot.y - activeTop).coerceIn(0f, activeHeight - 1f)
+                                                    val targetC = (relX / cWidthPx).toInt().coerceIn(0, gridCols - 1)
+                                                    val targetR = (relY / cHeightPx).toInt().coerceIn(0, displayRows - 1)
                                                     hoverGridCell = targetR to targetC
                                                 }
                                             },
@@ -1130,7 +1194,7 @@ fun HomeScreenContent(
                                                         onOpenAppContextMenu(dockApp, currentDragged)
                                                     }
                                                 } else {
-                                                    val destPage = pagerState.currentPage
+                                                    val destPage = if (pagerState.isScrollInProgress) pagerState.targetPage else pagerState.currentPage
                                                     val destStartRow = if (destPage == 0 && settings.showAtAGlanceWidget) 1 else 0
                                                     when {
                                                         targetDock != null -> {
@@ -1479,7 +1543,7 @@ fun HomeScreenContent(
                     openFolderInEditMode = false
                     onCloseFolder()
                 },
-                onUpdateFolder = onUpdateFolder
+                onUpdateFolder = { id, name, pkgs -> onUpdateFolder(id, name, pkgs, null) }
             )
         }
 
@@ -1493,8 +1557,8 @@ fun HomeScreenContent(
                 iconSizeDp = settings.homeIconSizeDp.dp,
                 iconScale = settings.iconScale,
                 onDismiss = { editingFolderSheetFolderId = null },
-                onConfirm = { updatedName, spanX, spanY, selectedStyle, updatedPackages ->
-                    onUpdateFolder(editingSheetFolder.id, updatedName, updatedPackages)
+                onConfirm = { updatedName, spanX, spanY, selectedStyle, updatedPackages, updatedColorHex ->
+                    onUpdateFolder(editingSheetFolder.id, updatedName, updatedPackages, updatedColorHex)
                     onResizeFolder(editingSheetFolder.id, spanX, spanY, selectedStyle)
                     editingFolderSheetFolderId = null
                 }
@@ -2088,10 +2152,12 @@ private fun EditFolderBottomSheet(
         spanX: Int,
         spanY: Int,
         displayStyle: FolderDisplayStyle,
-        updatedPackages: List<String>
+        updatedPackages: List<String>,
+        updatedColorHex: String
     ) -> Unit
 ) {
     var folderName by remember(folder.folderName) { mutableStateOf(folder.folderName) }
+    var folderColorHex by remember(folder.colorHex) { mutableStateOf(folder.cleanColorHex) }
     var selectedSize by remember(initialIs1x1, folder.displayStyle) {
         mutableStateOf(
             when {
@@ -2117,11 +2183,11 @@ private fun EditFolderBottomSheet(
         FolderSizeSelection.ENLARGED_BENTO -> FolderDisplayStyle.BENTO_2X2
         FolderSizeSelection.XXL_DENSE -> FolderDisplayStyle.DENSE_3X3
     }
-    val previewFolder = remember(folder, folderName, previewStyle, selectedPackages) {
+    val previewFolder = remember(folder, folderName, previewStyle, selectedPackages, folderColorHex) {
         val styleSuffix = if (previewStyle == FolderDisplayStyle.DENSE_3X3) "DENSE" else "BENTO"
         folder.copy(
             folderName = folderName,
-            colorHex = "${folder.cleanColorHex}:$styleSuffix",
+            colorHex = "$folderColorHex:$styleSuffix",
             memberPackages = selectedPackages.toList()
         )
     }
@@ -2206,12 +2272,14 @@ private fun EditFolderBottomSheet(
                             } else {
                                 2 to 2
                             }
+                            val styleSuffix = if (previewStyle == FolderDisplayStyle.DENSE_3X3) "DENSE" else "BENTO"
                             onConfirm(
                                 folderName.ifBlank { folder.folderName },
                                 sx,
                                 sy,
                                 previewStyle,
-                                selectedPackages.toList()
+                                selectedPackages.toList(),
+                                "$folderColorHex:$styleSuffix"
                             )
                         },
                         modifier = Modifier
@@ -2311,7 +2379,7 @@ private fun EditFolderBottomSheet(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(bottom = 24.dp),
+                        .padding(bottom = 20.dp),
                     horizontalArrangement = Arrangement.SpaceEvenly,
                     verticalAlignment = Alignment.Top
                 ) {
@@ -2336,6 +2404,70 @@ private fun EditFolderBottomSheet(
                         onClick = { selectedSize = FolderSizeSelection.XXL_DENSE },
                         testTag = "edit_folder_size_xxl"
                     )
+                }
+
+                // Accent Color & Theme Palette
+                Text(
+                    text = "Accent Color & Style",
+                    style = MaterialTheme.typography.labelLarge.copy(
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Medium
+                    ),
+                    color = Color(0xFF8E8E93),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 4.dp, bottom = 10.dp)
+                )
+
+                val folderColorPalette = listOf(
+                    "#3B82F6" to "Blue",
+                    "#8B5CF6" to "Purple",
+                    "#EC4899" to "Pink",
+                    "#10B981" to "Emerald",
+                    "#F59E0B" to "Amber",
+                    "#EF4444" to "Crimson",
+                    "#06B6D4" to "Cyan",
+                    "#475569" to "Dark Slate"
+                )
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 20.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    for ((hex, name) in folderColorPalette) {
+                        val isSelected = folderColorHex.equals(hex, ignoreCase = true)
+                        val swatchColor = try {
+                            Color(android.graphics.Color.parseColor(hex))
+                        } catch (_: Exception) {
+                            Color(0xFF3B82F6)
+                        }
+                        Box(
+                            modifier = Modifier
+                                .size(34.dp)
+                                .clip(CircleShape)
+                                .background(swatchColor)
+                                .clickable { folderColorHex = hex }
+                                .then(
+                                    if (isSelected) {
+                                        Modifier.border(2.5.dp, Color.White, CircleShape)
+                                    } else Modifier
+                                )
+                                .testTag("color_swatch_${name.lowercase()}"),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            if (isSelected) {
+                                Icon(
+                                    imageVector = Icons.Default.Check,
+                                    contentDescription = name,
+                                    tint = Color.White,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+                    }
                 }
 
                 // Subtle horizontal divider
