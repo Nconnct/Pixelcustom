@@ -1116,7 +1116,7 @@ fun SettingsAndCustomizationSheet(
                             onCheckedChange = { c -> onUpdateSettings { it.copy(showDock = c) } }
                         )
                         SettingSwitchRow(
-                            title = "Show Bottom Pixel Search Bar",
+                            title = "Show Home Screen Search Bar",
                             checked = settings.showBottomSearchBar,
                             onCheckedChange = { c -> onUpdateSettings { it.copy(showBottomSearchBar = c) } }
                         )
