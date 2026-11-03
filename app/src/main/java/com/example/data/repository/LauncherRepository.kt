@@ -140,10 +140,12 @@ class LauncherRepository(
     }
 
     suspend fun initializeLauncherState() = withContext(Dispatchers.IO) {
-        // 1. Seed default settings if absent, and ensure at least 3 Home Screen pages
+        // Detect a genuinely fresh install before writing the default settings row.
+        // Existing users must never have their customized home layout re-seeded on every launch.
         val existingSettings = dao.getSettingsSnapshot()
+        val isFirstInstall = existingSettings == null && dao.getHomeItemsSnapshot().isEmpty()
         if (existingSettings == null) {
-            dao.upsertSettings(LauncherSettingsEntity(homePageCount = 3))
+            dao.upsertSettings(LauncherSettingsEntity())
         } else if (existingSettings.homePageCount < 3) {
             dao.upsertSettings(existingSettings.copy(homePageCount = 3))
         }
@@ -175,11 +177,9 @@ class LauncherRepository(
         // 5. Discover installed apps and run offline AI classification where needed
         refreshInstalledApps()
 
-        // 6. Seed 3-page ML Smart Folders (Page 1) + Extra Apps (Pages 2 & 3) if empty or still on legacy 1-page layout
-        val currentHomeItems = dao.getHomeItemsSnapshot()
-        val currentFolders = dao.getFoldersSnapshot()
-        val hasMultiPageItems = currentHomeItems.any { !it.isDockItem && it.pageIndex >= 1 }
-        if (currentHomeItems.isEmpty() || currentFolders.isEmpty() || !hasMultiPageItems) {
+        // 6. Seed a clean four-folder starter home only on a true first install.
+        // Later launches and app-category refreshes must preserve every user edit.
+        if (isFirstInstall) {
             seedDefaultHomeLayout()
         }
     }
@@ -232,7 +232,7 @@ class LauncherRepository(
             }
         }
 
-        if (updatedCount > 0) {
+        if (updatedCount > 0 && dao.getHomeItemsSnapshot().isEmpty()) {
             seedDefaultHomeLayout()
         }
         updatedCount
@@ -422,8 +422,10 @@ class LauncherRepository(
         }
         if (apps.isEmpty()) return
 
-        val preview = homeOrganizer.generateProposedLayout(
-            mode = ArrangementMode.AI_ORGANIZED,
+        // Reuse the launcher's essential-app ranking for the dock, but do not scatter
+        // individual shortcuts across the first-run home page.
+        val dockPreview = homeOrganizer.generateProposedLayout(
+            mode = ArrangementMode.PIXEL_DEFAULT,
             installedApps = apps,
             existingItems = emptyList(),
             existingFolders = emptyList(),
@@ -431,11 +433,118 @@ class LauncherRepository(
             gridRows = settings.homeGridRows,
             dockCapacity = settings.dockIconCount
         )
-        applyProposedLayout(preview, saveUndoSnapshot = false)
+        val dockPackages = dockPreview.dockPackages.take(settings.dockIconCount).toSet()
+        val appByPackage = apps.associateBy { it.packageName }
+
+        val starterFolders = listOf(
+            Triple(
+                "Social",
+                "#10B981:BENTO",
+                setOf(DefaultCategory.SOCIAL.id, DefaultCategory.MESSAGING.id)
+            ),
+            Triple(
+                "Media",
+                "#EF4444:BENTO",
+                setOf(
+                    DefaultCategory.VIDEO_STREAMING.id,
+                    DefaultCategory.MUSIC_AUDIO.id,
+                    DefaultCategory.PHOTOGRAPHY.id,
+                    DefaultCategory.GAMES.id
+                )
+            ),
+            Triple(
+                "Tools",
+                "#3B82F6:BENTO",
+                setOf(
+                    DefaultCategory.BROWSERS.id,
+                    DefaultCategory.INTERNET.id,
+                    DefaultCategory.UTILITIES.id,
+                    DefaultCategory.SYSTEM_APPS.id,
+                    DefaultCategory.BANKING.id,
+                    DefaultCategory.UPI_PAYMENTS.id,
+                    DefaultCategory.SHOPPING.id,
+                    DefaultCategory.UNCATEGORIZED.id
+                )
+            ),
+            Triple(
+                "Work",
+                "#8B5CF6:BENTO",
+                setOf(
+                    DefaultCategory.PRODUCTIVITY.id,
+                    DefaultCategory.EDUCATION.id,
+                    DefaultCategory.TECH_DEV.id
+                )
+            )
+        )
+
+        val cols = settings.homeGridColumns.coerceIn(3, 6)
+        val rows = settings.homeGridRows.coerceIn(4, 7)
+        val startRow = if (settings.showAtAGlanceWidget) 1 else 0
+        val folderRow = (rows - 2).coerceIn(startRow, rows - 1)
+        val homeItems = mutableListOf<HomeScreenItemEntity>()
+
+        starterFolders.forEachIndexed { index, (name, color, categories) ->
+            val column = index % cols
+            val row = (folderRow + index / cols).coerceAtMost(rows - 1)
+            val members = apps
+                .asSequence()
+                .filter { it.packageName !in dockPackages && it.categoryId in categories }
+                .map { it.packageName }
+                .distinct()
+                .toList()
+
+            val folderId = dao.insertFolder(
+                FolderEntity(
+                    folderName = name,
+                    pageIndex = 0,
+                    row = row,
+                    column = column,
+                    colorHex = color,
+                    memberPackagesCsv = members.joinToString(",")
+                )
+            )
+            homeItems.add(
+                HomeScreenItemEntity(
+                    pageIndex = 0,
+                    row = row,
+                    column = column,
+                    spanX = 1,
+                    spanY = 1,
+                    isDockItem = false,
+                    itemType = HomeItemType.FOLDER.name,
+                    customLabel = name,
+                    folderId = folderId,
+                    isPinnedByUser = true
+                )
+            )
+        }
+
+        dockPackages.forEachIndexed { index, packageName ->
+            val app = appByPackage[packageName] ?: return@forEachIndexed
+            homeItems.add(
+                HomeScreenItemEntity(
+                    pageIndex = 0,
+                    row = rows - 1,
+                    column = index,
+                    spanX = 1,
+                    spanY = 1,
+                    isDockItem = true,
+                    dockIndex = index,
+                    itemType = HomeItemType.APP_SHORTCUT.name,
+                    packageName = packageName,
+                    customLabel = app.appName,
+                    isPinnedByUser = true
+                )
+            )
+        }
+
+        dao.clearAllHomeItems()
+        dao.clearAllFolders()
+        dao.insertHomeItems(homeItems)
         dao.upsertSettings(
             settings.copy(
-                homePageCount = maxOf(3, preview.pagesCount),
-                arrangementMode = ArrangementMode.AI_ORGANIZED.name
+                homePageCount = 3,
+                arrangementMode = ArrangementMode.PIXEL_DEFAULT.name
             )
         )
     }
