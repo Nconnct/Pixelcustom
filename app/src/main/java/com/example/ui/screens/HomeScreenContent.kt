@@ -312,6 +312,16 @@ fun HomeScreenContent(
                 )
             }
 
+            // Wide home search widget sits directly under the clock, matching the starter layout.
+            if (settings.showBottomSearchBar) {
+                PixelBottomSearchBar(
+                    onSearchBarClick = { onOpenOverlay(ActiveOverlaySheet.UNIFIED_SEARCH) },
+                    onOpenDrawerClick = { onOpenOverlay(ActiveOverlaySheet.APP_DRAWER) },
+                    onOpenAiOrganizerClick = { onOpenOverlay(ActiveOverlaySheet.AI_ORGANIZER_PREVIEW) },
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                )
+            }
+
             // Active Drag / Move Mode Banner
             val activeDragged = draggedItem
             if (activeDragged != null && dragTotalDistance > dragMoveThresholdPx) {
@@ -1022,16 +1032,6 @@ fun HomeScreenContent(
                         }
                     }
                 }
-            }
-
-            // 4. Compact Centered Frosted Glass Search Pill (matching screenshot above dock)
-            if (settings.showBottomSearchBar) {
-                PixelBottomSearchBar(
-                    onSearchBarClick = { onOpenOverlay(ActiveOverlaySheet.UNIFIED_SEARCH) },
-                    onOpenDrawerClick = { onOpenOverlay(ActiveOverlaySheet.APP_DRAWER) },
-                    onOpenAiOrganizerClick = { onOpenOverlay(ActiveOverlaySheet.AI_ORGANIZER_PREVIEW) },
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
-                )
             }
 
             // 5. Pinned Borderless Frosted Glass Dock
